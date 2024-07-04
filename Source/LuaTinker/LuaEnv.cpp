@@ -3,6 +3,7 @@
 
 #include "LuaEnv.h"
 #include "MyActor.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 LuaEnv::LuaEnv()
 {
@@ -84,26 +85,27 @@ bool LuaEnv::BindInternal(UObject* Object, UClass* Class, const TCHAR* InModuleN
 
 DEFINE_FUNCTION(LuaEnv::execCallLua)
 {
-    UFunction* Func = Stack.Node;
-    UObject* Obj = Stack.Object;
     UFunction* NativeFunc = Stack.CurrentNativeFunction;
     P_FINISH;
 
-    UE_LOG(LogTemp, Error, TEXT("execCallLua: Obj %s, Func %s, Native Func %s"), *Obj->GetName(), *Func->GetName(), *NativeFunc->GetName());
+    UE_LOG(LogTemp, Error, TEXT("execCallLua: Obj %s, Native Func %s"), *Context->GetName(), *NativeFunc->GetName());
 
-    void** TablePtr = ObjToTable.Find(Obj);
-    if (TablePtr == nullptr)
+    //lua_pushlightuserdata(L, (*TablePtr));
+
+    const char* ModuleName = TCHAR_TO_UTF8(*Context->GetClass()->GetName());
+    if (lua_getglobal(L, ModuleName) != LUA_TTABLE)
     {
+        lua_pop(L, 1);
         return;
     }
 
-    lua_pushlightuserdata(L, (*TablePtr));
-    lua_pushstring(L, TCHAR_TO_UTF8(*Func->GetName()));
+    lua_pushstring(L, TCHAR_TO_UTF8(*NativeFunc->GetName()));
     lua_gettable(L, -2); // 在表中查找对应函数
     if (lua_isfunction(L, -1))
     {
+        lua_pushvalue(L, -2); // 将表压入栈作为 self 参数
         lua_pushstring(L, "123");
-        lua_pcall(L, 1, 1, 0);
+        lua_pcall(L, 2, 1, 0);
         const char* LuaRet = lua_tostring(L, -1);
         lua_pop(L, 1);
 
@@ -184,14 +186,19 @@ void LuaEnv::PushMetatable(UObject* Object, const char* MetatableName)
 
 bool LuaEnv::BindTableForObject(UObject* Object, const char* InModuleName)
 {
-    lua_getglobal(L, "require");
-    lua_pushstring(L, InModuleName);
+    //lua_getglobal(L, "require");
+    FString ProjectDir = UKismetSystemLibrary::GetProjectDirectory();
+    ProjectDir += InModuleName;
+    ProjectDir += ".lua";
+    //lua_pushstring(L, TCHAR_TO_UTF8(*ProjectDir));
 
     // 调用require函数，两个字符串参数和require函数本身在栈上
-    if (lua_pcall(L, 1, 1, 0) != LUA_OK)
-    {
-        return false;
-    }
+    //if (lua_pcall(L, 1, 1, 0) != LUA_OK)
+    //{
+    //    return false;
+    //}
+
+    luaL_dofile(L, TCHAR_TO_UTF8(*ProjectDir));
 
     // 加载成功，返回值为表
     if (!lua_istable(L, -1))
@@ -201,12 +208,10 @@ bool LuaEnv::BindTableForObject(UObject* Object, const char* InModuleName)
 
     // 处理返回的 Lua 表
     lua_pushvalue(L, -1);
-    void* tablePtr = (void*)lua_topointer(L, -1);
-
-    // 相互存一下指针便于找到对方
-    ObjToTable.Add(Object, tablePtr);
     luaL_ref(L, LUA_REGISTRYINDEX);
-    PushMetatable(Object, InModuleName);
+
+    //PushMetatable(Object, InModuleName);
+    lua_setglobal(L, InModuleName);
 
     return true;
 }

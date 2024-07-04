@@ -24,7 +24,7 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	UFUNCTION(BlueprintCallable)
-	FString GetModuleName() { return this->GetName(); }
+	FString GetModuleName() { return StaticClass()->GetName(); }
 
 	UFUNCTION(BlueprintCallable)
 	void TestFunc() { UE_LOG(LogTemp, Error, TEXT("Origin TestFunc")); }
