@@ -79,3 +79,5 @@ Plugins/Unlua/Source/UnLuaDefaultParamCollectorUbtPlugin
 DerivedDataCache/*
 
 enc_temp_folder/*
+
+TempPlugins/*

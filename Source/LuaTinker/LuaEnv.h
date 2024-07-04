@@ -4,11 +4,27 @@
 
 #include "CoreMinimal.h"
 
-/**
- * 
- */
+extern "C"
+{
+#include "ThirdParty/lua.h"
+#include "ThirdParty/lualib.h"
+#include "ThirdParty/lauxlib.h"
+};
+
+#include "LuaEnv.generated.h"
+
 class LUATINKER_API LuaEnv : public FUObjectArray::FUObjectCreateListener
 {
+	GENERATED_BODY()
+protected:
+	static TMap<UObject*, void*> ObjToTable;
+	static struct lua_State* L;
+
+public:
+	//void SetTableForClass(lua_State* L, const char* Name);
+	void PushMetatable(UObject* Object, const char* MetatableName);
+	bool BindTableForObject(UObject* Object, const char* InModuleName);
+
 public:
 	LuaEnv();
 	~LuaEnv();
