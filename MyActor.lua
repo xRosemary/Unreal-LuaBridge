@@ -1,7 +1,7 @@
 local MyActor = {}
 
-function MyActor:TestFunc(inStr)
-    return inStr .. "456"
+function MyActor:TestFunc()
+    return self.TestVar
 end
 
 return MyActor

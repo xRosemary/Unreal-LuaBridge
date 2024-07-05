@@ -5,6 +5,59 @@
 #include "MyActor.h"
 #include "Kismet/KismetSystemLibrary.h"
 
+/**
+ * __index meta methods for class
+ */
+int32 Class_Index(lua_State* L)
+{
+    // 获取 Lua 表对象
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    // 获取键名
+    const char* key = luaL_checkstring(L, 2);
+
+    lua_pushstring(L, key);
+
+    // 在此处可以实现自定义的索引行为，比如查找特定的键并返回对应的值
+    return 1;
+}
+
+/**
+ * __newindex meta methods for class
+ */
+int32 Class_NewIndex(lua_State* L)
+{
+    // 获取 Lua 表对象
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    // 获取键名和值
+    const char* key = luaL_checkstring(L, 2);
+    int value = luaL_checkinteger(L, 3);
+
+    // 在此处可以实现自定义的赋值行为，比如设置特定的键对应的值
+
+    return 0;  // 返回值数量为0
+}
+
+/**
+ * Generic closure to call a UFunction
+ */
+int32 Class_CallUFunction(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    // 获取调用参数
+    int arg1 = luaL_checkinteger(L, 2);
+    int arg2 = luaL_checkinteger(L, 3);
+
+    // 进行一些操作
+    int sum = arg1 + arg2;
+
+    // 将结果压入 Lua 栈
+    lua_pushinteger(L, sum);
+
+    return 1;  // 返回值数量为1
+}
+
 LuaEnv::LuaEnv()
 {
     if (L == nullptr)
@@ -103,10 +156,13 @@ DEFINE_FUNCTION(LuaEnv::execCallLua)
     lua_gettable(L, -2); // 在表中查找对应函数
     if (lua_isfunction(L, -1))
     {
-        lua_pushvalue(L, -2); // 将表压入栈作为 self 参数
-        lua_pushstring(L, "123");
-        lua_pcall(L, 2, 1, 0);
+        PushUserData(Context); // 将UObject的指针作为Self参数
+        //lua_pushlightuserdata(L, Context); // 将UObject的指针作为Self参数
+        //lua_pushvalue(L, -2); // 将表压入栈作为 self 参数
+        //lua_pushstring(L, "123");
+        lua_pcall(L, 1, 1, 0);
         const char* LuaRet = lua_tostring(L, -1);
+        //UObject* LuaRet = (UObject*)lua_topointer(L, -1);
         lua_pop(L, 1);
 
         UE_LOG(LogTemp, Error, TEXT("Lua Ret %s"), *FString(LuaRet));
@@ -123,6 +179,40 @@ void LuaEnv::NotifyUObjectCreated(const UObjectBase* ObjectBase, int32 Index)
 
     UE_LOG(LogTemp, Error, TEXT("Locate for %s"), *ObjectBase->GetClass()->GetName());
     TryToBind((UObject*)(ObjectBase));
+}
+
+void LuaEnv::PushUserData(UObject* Object)
+{
+    lua_createtable(L, 0, 0);
+    lua_pushstring(L, "NativePtr");
+    lua_pushlightuserdata(L, Object);
+    lua_rawset(L, -3);
+
+    int Type = luaL_getmetatable(L, "__UMT");
+    if (Type == LUA_TTABLE)
+    {
+        lua_setmetatable(L, -2);
+        return;
+    }
+
+    // 没有的话先把nil弹出，然后创建一个metatable
+    lua_pop(L, 1);
+    luaL_newmetatable(L, "__UMT");
+
+    lua_pushstring(L, "__index");
+    lua_pushcfunction(L, Class_Index);
+    lua_rawset(L, -3);
+
+    lua_pushstring(L, "__newindex");
+	lua_pushcfunction(L, Class_NewIndex);
+	lua_rawset(L, -3);
+
+    lua_pushstring(L, "__call");
+    lua_pushcclosure(L, Class_CallUFunction, 1);
+    lua_rawset(L, -3);
+
+    lua_setmetatable(L, -2);
+    //lua_pop(L, 1); // metatable设置完后只留下表示UObject的UserData
 }
 
 void LuaEnv::PushMetatable(UObject* Object, const char* MetatableName)
