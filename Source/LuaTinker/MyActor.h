@@ -19,6 +19,13 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
+public:
+	UPROPERTY()
+	int TestVar = 10;
+
+	UPROPERTY()
+	int TestVar2 = 15;
+
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;

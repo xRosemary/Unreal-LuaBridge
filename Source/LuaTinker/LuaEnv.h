@@ -21,9 +21,7 @@ protected:
 	inline static lua_State* L = nullptr;
 
 public:
-	//void SetTableForClass(lua_State* L, const char* Name);
 	static void PushUserData(UObject* Object);
-	void PushMetatable(UObject* Object, const char* MetatableName);
 	bool BindTableForObject(UObject* Object, const char* InModuleName);
 
 public:

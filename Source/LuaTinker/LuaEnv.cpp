@@ -5,20 +5,98 @@
 #include "MyActor.h"
 #include "Kismet/KismetSystemLibrary.h"
 
+int print_lua_stack(lua_State* L) {
+    int top = lua_gettop(L); // 获取堆栈顶部索引
+    
+    for (int i = 1; i <= top; i++) {
+        int type = lua_type(L, i); // 获取值的类型
+        UE_LOG(LogTemp, Error, TEXT("print_lua_stack: %d"), type);
+    }
+
+    UE_LOG(LogTemp, Error, TEXT("print_lua_stack Size: %d"), lua_gettop(L));
+
+    return 0;
+}
+
+
+void PushUPropertyToLua(lua_State* L, FProperty* Property, UObject* Obj)
+{
+    if (FFloatProperty* FloatProperty = CastField<FFloatProperty>(Property))
+    {
+        float Value = FloatProperty->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<float>(Obj));
+        lua_pushnumber(L, Value);
+    }
+    else if (FIntProperty* IntProperty = CastField<FIntProperty>(Property))
+    {
+        int32 Value = IntProperty->GetSignedIntPropertyValue(Property->ContainerPtrToValuePtr<int32>(Obj));
+        lua_pushnumber(L, Value);
+    }
+    else if (FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
+    {
+        bool Value = BoolProperty->GetPropertyValue(Property->ContainerPtrToValuePtr<void>(Obj));
+        lua_pushboolean(L, Value);
+    }
+    else if (FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
+    {
+        UObject* Value = ObjectProperty->GetObjectPropertyValue(Property->ContainerPtrToValuePtr<UObject*>(Obj));
+        LuaEnv::PushUserData(Value);
+    }
+    else if (FStrProperty* StringProperty = CastField<FStrProperty>(Property))
+    {
+        FString Value = StringProperty->GetPropertyValue(Property->ContainerPtrToValuePtr<UObject*>(Obj));
+        lua_pushstring(L, TCHAR_TO_UTF8(*Value));
+    }
+}
+
 /**
  * __index meta methods for class
  */
 int32 Class_Index(lua_State* L)
 {
     // 获取 Lua 表对象
-    luaL_checktype(L, 1, LUA_TTABLE);
+    luaL_checktype(L, -2, LUA_TTABLE);
 
     // 获取键名
-    const char* key = luaL_checkstring(L, 2);
+    const char* key = lua_tostring(L, -1);
+    lua_pop(L, 1);
+
+    // 尝试从UObject里拿值
+    // 拿对应的UObject指针
+    lua_pushstring(L, "NativePtr");
+    lua_rawget(L, -2);
+    if (lua_islightuserdata(L, -1))
+    {
+        UObject* Obj = (UObject*)lua_touserdata(L, -1);
+        lua_pop(L, 1);
+        // 将对应UProperty的数值压栈
+        FName PropertyName(key);
+        for (TFieldIterator<FProperty> Property(Obj->GetClass()); Property; ++Property)
+        {
+            if (Property->GetFName() == PropertyName)
+            {
+                PushUPropertyToLua(L, *Property, Obj); // 再把值塞进去
+                return 1;
+            }
+        }
+    }
+    else
+    {
+        lua_pop(L, 1); // 弹出nil
+    }
+
+    lua_pushstring(L, "__ClassDesc");
+    lua_rawget(L, -2);
+    if (!lua_istable(L, -1))
+    {
+        lua_pop(L, 1);
+        lua_pushnil(L);
+        return 1;
+    }
 
     lua_pushstring(L, key);
+    lua_gettable(L, -2);
+    lua_remove(L, -2); // 把__ClassDesc拿到的表移出去
 
-    // 在此处可以实现自定义的索引行为，比如查找特定的键并返回对应的值
     return 1;
 }
 
@@ -58,17 +136,99 @@ int32 Class_CallUFunction(lua_State* L)
     return 1;  // 返回值数量为1
 }
 
+static void CreateUnrealMetaTable(lua_State* L)
+{
+    int Type = luaL_getmetatable(L, "__UMT");
+    if (Type == LUA_TTABLE)
+    {
+        return;
+    }
+
+    // 没有的话先把nil弹出，然后创建一个metatable
+    lua_pop(L, 1);
+    luaL_newmetatable(L, "__UMT");
+    lua_pushvalue(L, -1);
+    lua_setmetatable(L, -2);
+
+    //lua_pushstring(L, "__index");
+    //lua_pushcfunction(L, Class_Index);
+    //lua_rawset(L, -3);
+
+    //lua_pushstring(L, "__call");
+    //lua_pushcfunction(L, Class_CallUFunction);
+    //lua_rawset(L, -3);
+}
+
+static int CreateUClass(lua_State* L)
+{
+    lua_createtable(L, 0, 0);
+    lua_createtable(L, 0, 0);
+    lua_pushstring(L, "__index");
+    CreateUnrealMetaTable(L);
+    lua_rawset(L, -3);
+    lua_setmetatable(L, -2);
+    return 1;
+}
+
+static FString GetMessage(lua_State* L)
+{
+    const auto ArgCount = lua_gettop(L);
+    FString Message;
+    if (!lua_checkstack(L, ArgCount))
+    {
+        luaL_error(L, "too many arguments, stack overflow");
+        return Message;
+    }
+    for (int ArgIndex = 1; ArgIndex <= ArgCount; ArgIndex++)
+    {
+        if (ArgIndex > 1)
+            Message += "\t";
+        Message += UTF8_TO_TCHAR(luaL_tolstring(L, ArgIndex, NULL));
+    }
+    return Message;
+}
+
+static int LogInfo(lua_State* L)
+{
+    const auto Msg = GetMessage(L);
+    UE_LOG(LogTemp, Log, TEXT("%s"), *Msg);
+    return 0;
+}
+
+static int ErrorInfo(lua_State* L)
+{
+    const auto Msg = GetMessage(L);
+    UE_LOG(LogTemp, Error, TEXT("%s"), *Msg);
+    return 0;
+}
+
+static const struct luaL_Reg UE_Base_Lib[] = {
+  {"UClass", CreateUClass},
+  {"log", LogInfo},
+  {"error", ErrorInfo},
+  {"dump", print_lua_stack},
+  {NULL, NULL}  /* sentinel */
+};
+
+int luaopen_UE_BaseLib(lua_State* L) {
+    luaL_newlib(L, UE_Base_Lib);
+    return 1;
+}
+
 LuaEnv::LuaEnv()
 {
     if (L == nullptr)
     {
         L = luaL_newstate();
         luaL_openlibs(L);
+        luaL_requiref(L, "UE", luaopen_UE_BaseLib, 1);
     }
 }
 
 LuaEnv::~LuaEnv()
 {
+    lua_close(L);
+    L = nullptr;
 }
 
 bool LuaEnv::TryToBind(UObject* Object)
@@ -124,8 +284,6 @@ bool LuaEnv::BindInternal(UObject* Object, UClass* Class, const TCHAR* InModuleN
     // functions
     for (TFieldIterator<UFunction> It(Class, EFieldIteratorFlags::IncludeSuper, EFieldIteratorFlags::ExcludeDeprecated, EFieldIteratorFlags::ExcludeInterfaces); It; ++It)
     {
-        //UE_LOG(LogTemp, Error, TEXT("TFieldIterator: %s"), *It->GetName());
-
         if (It->GetName() == FString("TestFunc"))
         {
             It->SetNativeFunc(&LuaEnv::execCallLua);
@@ -143,8 +301,6 @@ DEFINE_FUNCTION(LuaEnv::execCallLua)
 
     UE_LOG(LogTemp, Error, TEXT("execCallLua: Obj %s, Native Func %s"), *Context->GetName(), *NativeFunc->GetName());
 
-    //lua_pushlightuserdata(L, (*TablePtr));
-
     const char* ModuleName = TCHAR_TO_UTF8(*Context->GetClass()->GetName());
     if (lua_getglobal(L, ModuleName) != LUA_TTABLE)
     {
@@ -157,16 +313,18 @@ DEFINE_FUNCTION(LuaEnv::execCallLua)
     if (lua_isfunction(L, -1))
     {
         PushUserData(Context); // 将UObject的指针作为Self参数
-        //lua_pushlightuserdata(L, Context); // 将UObject的指针作为Self参数
-        //lua_pushvalue(L, -2); // 将表压入栈作为 self 参数
-        //lua_pushstring(L, "123");
         lua_pcall(L, 1, 1, 0);
-        const char* LuaRet = lua_tostring(L, -1);
-        //UObject* LuaRet = (UObject*)lua_topointer(L, -1);
+        lua_Number LuaRet = lua_tonumber(L, -1);
         lua_pop(L, 1);
-
-        UE_LOG(LogTemp, Error, TEXT("Lua Ret %s"), *FString(LuaRet));
+        UE_LOG(LogTemp, Error, TEXT("Lua Ret %f"), LuaRet);
     }
+    else
+    {
+        lua_pop(L, 1); // 弹出nil
+    }
+
+    lua_pop(L, 1); // 弹出Table
+    print_lua_stack(L);
 }
 
 void LuaEnv::NotifyUObjectCreated(const UObjectBase* ObjectBase, int32 Index)
@@ -177,7 +335,6 @@ void LuaEnv::NotifyUObjectCreated(const UObjectBase* ObjectBase, int32 Index)
         return;
     }
 
-    UE_LOG(LogTemp, Error, TEXT("Locate for %s"), *ObjectBase->GetClass()->GetName());
     TryToBind((UObject*)(ObjectBase));
 }
 
@@ -188,90 +345,23 @@ void LuaEnv::PushUserData(UObject* Object)
     lua_pushlightuserdata(L, Object);
     lua_rawset(L, -3);
 
-    int Type = luaL_getmetatable(L, "__UMT");
-    if (Type == LUA_TTABLE)
-    {
-        lua_setmetatable(L, -2);
-        return;
-    }
-
-    // 没有的话先把nil弹出，然后创建一个metatable
-    lua_pop(L, 1);
-    luaL_newmetatable(L, "__UMT");
-
     lua_pushstring(L, "__index");
     lua_pushcfunction(L, Class_Index);
     lua_rawset(L, -3);
 
-    lua_pushstring(L, "__newindex");
-	lua_pushcfunction(L, Class_NewIndex);
-	lua_rawset(L, -3);
-
-    lua_pushstring(L, "__call");
-    lua_pushcclosure(L, Class_CallUFunction, 1);
-    lua_rawset(L, -3);
-
+    lua_pushvalue(L, -1);
     lua_setmetatable(L, -2);
-    //lua_pop(L, 1); // metatable设置完后只留下表示UObject的UserData
-}
 
-void LuaEnv::PushMetatable(UObject* Object, const char* MetatableName)
-{
-    // 有的话就不创建了
-    int Type = luaL_getmetatable(L, MetatableName);
+    lua_pushstring(L, "__ClassDesc");
+    int Type = lua_getglobal(L, TCHAR_TO_UTF8(*Object->GetClass()->GetName()));
     if (Type == LUA_TTABLE)
     {
-        return;
+        lua_rawset(L, -3);
     }
-    lua_pop(L, 1);
-
-    luaL_newmetatable(L, MetatableName);
-    lua_pushstring(L, "NativePtr");
-    lua_pushlightuserdata(L, Object);
-    lua_rawset(L, -3);
-
-
-    /*lua_pushstring(L, "__index");
-    lua_pushcfunction(L, Class_Index);
-    lua_rawset(L, -3);
-
-    lua_pushstring(L, "__newindex");
-    //lua_pushcfunction(L, Class_NewIndex);
-    //lua_rawset(L, -3);
-
-    uint64 TypeHash = (uint64)ClassDesc->AsStruct();
-    lua_pushstring(L, "TypeHash");
-    lua_pushnumber(L, TypeHash);
-    lua_rawset(L, -3);
-
-    lua_pushstring(L, "ClassDesc");
-    lua_pushlightuserdata(L, ClassDesc);
-    lua_rawset(L, -3);*/
-
-    //UClass* Class = ClassDesc->AsClass();
-
-    //if (Class != UObject::StaticClass() && Class != UClass::StaticClass())
-    //{
-    //    lua_pushstring(L, "StaticClass");
-    //    lua_pushlightuserdata(L, ClassDesc);
-    //    lua_pushcclosure(L, Class_StaticClass, 1);
-    //    lua_rawset(L, -3);
-
-    //    lua_pushstring(L, "Cast");
-    //    lua_pushcfunction(L, Class_Cast);
-    //    lua_rawset(L, -3);
-
-    //    lua_pushstring(L, "__eq");
-    //    lua_pushcfunction(L, UObject_Identical);
-    //    lua_rawset(L, -3);
-
-    //    lua_pushstring(L, "__gc");
-    //    lua_pushcfunction(L, UObject_Delete);
-    //    lua_rawset(L, -3);
-    //}*/
-
-    lua_pushvalue(L, -1); // set metatable to self
-    lua_setmetatable(L, -2);
+    else
+    {
+        lua_pop(L, 2);
+    }
 }
 
 bool LuaEnv::BindTableForObject(UObject* Object, const char* InModuleName)
@@ -296,12 +386,8 @@ bool LuaEnv::BindTableForObject(UObject* Object, const char* InModuleName)
         return false;
     }
 
-    // 处理返回的 Lua 表
-    lua_pushvalue(L, -1);
-    luaL_ref(L, LUA_REGISTRYINDEX);
-
-    //PushMetatable(Object, InModuleName);
     lua_setglobal(L, InModuleName);
+    lua_pop(L, 1);
 
     return true;
 }
