@@ -109,7 +109,7 @@ void PullBytesFromLua(lua_State* L, FProperty* Property, BYTE* OutParams, int In
     }
     else if (Property->IsA<FIntProperty>() != NULL)
     {
-        *(int*)(OutParams) = (int)lua_tonumber(L, Index);
+        *(int*)(OutParams) = (int)lua_tointeger(L, Index);
     }
     else if (Property->IsA<FBoolProperty>() != NULL)
     {
@@ -208,7 +208,7 @@ int LuaCallUFunction(lua_State* L)
     return RetType == NULL ? 0 : 1;
 }
 
-void InternalCallLua(lua_State* L, UFunction* Function, BYTE* Params)
+void InternalCallLua(lua_State* L, UFunction* Function, BYTE* Params, BYTE* Result)
 {
     FProperty* RetType = PrepareParmsForLua(L, Function, Params);
 
@@ -221,7 +221,7 @@ void InternalCallLua(lua_State* L, UFunction* Function, BYTE* Params)
 
     if (bHasReturnParam)
     {
-        PullBytesFromLua(L, RetType, ReturnValueAddress, -1);
+        PullBytesFromLua(L, RetType, Result, -1);
         lua_pop(L, 1);
     }
 }
@@ -476,7 +476,7 @@ bool LuaEnv::BindInternal(UObject* Object, UClass* Class, const TCHAR* InModuleN
 DEFINE_FUNCTION(LuaEnv::execCallLua)
 {
     UFunction* NativeFunc = Stack.CurrentNativeFunction;
-    P_FINISH;
+    //P_FINISH;
 
     UE_LOG(LogTemp, Error, TEXT("execCallLua: Obj %s, Native Func %s"), *Context->GetName(), *NativeFunc->GetName());
 
@@ -492,7 +492,18 @@ DEFINE_FUNCTION(LuaEnv::execCallLua)
     if (lua_isfunction(L, -1))
     {
         PushUserData(Context); // 将UObject的指针作为Self参数
-        InternalCallLua(L, NativeFunc, Stack.Locals);
+
+        BYTE* Params = (BYTE*)FMemory::Malloc(NativeFunc->ParmsSize);
+        FMemory::Memzero(Params, NativeFunc->ParmsSize);
+        for (TFieldIterator<FProperty> It(NativeFunc); It && (It->PropertyFlags & CPF_Parm) == CPF_Parm; ++It)
+        {
+            Stack.Step(Stack.Object, It->ContainerPtrToValuePtr<BYTE>(Params));
+        }
+        Stack.SkipCode(1);          // skip EX_EndFunctionParms
+
+        InternalCallLua(L, NativeFunc, Params, (BYTE*)RESULT_PARAM);
+
+        FMemory::Free(Params);
     }
     else
     {

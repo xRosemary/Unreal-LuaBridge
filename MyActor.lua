@@ -9,8 +9,9 @@ function MyActor:TestFunc()
     -- UE.error(self.GetTestVar())
     -- UE.error(self.GetTestVar2())
     UE.error(self:TestFuncWithParam(123123, "abc", true))
-    self:TestFuncWithParam2(123123, "abc", true)
-    UE.dump()
+    UE.error(self.TestFuncWithParam)
+    -- UE.error(self:TestFuncWithParam2(123123, "abc", true))
+    -- UE.error(MyActor.TestFuncWithParam2)
     UE.error("--------------")
 end
 
@@ -19,6 +20,8 @@ function MyActor:TestFuncWithParam2(Param1, Param2, Param3)
     UE.error(Param2)
     UE.error(Param3)
     UE.error(self.TestVar)
+    self:TestFunc()
+    UE.dump()
     return 123
 end
 
