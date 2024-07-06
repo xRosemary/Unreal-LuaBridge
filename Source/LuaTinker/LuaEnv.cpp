@@ -135,6 +135,12 @@ FProperty* PrepareParmsForUE(lua_State* L, UFunction* Func, BYTE* Params)
         return NULL;
     }
 
+    // 不需要lua传过来的self
+    if (lua_istable(L, 1))
+    {
+        i++;
+    }
+
     for (TFieldIterator<FProperty> IteratorOfParam(Func); IteratorOfParam; ++IteratorOfParam) {
         FProperty* Property = *IteratorOfParam;
         Offset = Property->GetOffset_ForInternal();
