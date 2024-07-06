@@ -6,10 +6,10 @@
 #include "Kismet/KismetSystemLibrary.h"
 
 int print_lua_stack(lua_State* L) {
-    int top = lua_gettop(L); // »ñÈ¡¶ÑÕ»¶¥²¿Ë÷Òı
+    int top = lua_gettop(L); // è·å–å †æ ˆé¡¶éƒ¨ç´¢å¼•
     
     for (int i = 1; i <= top; i++) {
-        int type = lua_type(L, i); // »ñÈ¡ÖµµÄÀàĞÍ
+        int type = lua_type(L, i); // è·å–å€¼çš„ç±»å‹
         UE_LOG(LogTemp, Error, TEXT("print_lua_stack: %d"), type);
     }
 
@@ -91,8 +91,40 @@ void PushBytesToLua(lua_State* L, FProperty* Property, BYTE* Params)
     }
 }
 
-// luaÕ»µÄ²ÎÊıÑ¹ÈëĞé»Ã£¬²¢ÇÒ¸ø³ö·µ»ØÖµÀàĞÍ
-FProperty* PrepareParms(lua_State* L, UFunction* Func, BYTE* Params)
+void PullBytesFromLua(lua_State* L, FProperty* Property, BYTE* OutParams, int Index)
+{
+    if (Property == NULL || OutParams == NULL)
+    {
+        return;
+    }
+    if (Property->IsA<FFloatProperty>())
+    {
+        *(float*)(OutParams) = (float)lua_tonumber(L, Index);
+    }
+    else if (Property->IsA<FDoubleProperty>() != NULL)
+    {
+        *(double*)(OutParams) = (double)lua_tonumber(L, Index);
+    }
+    else if (Property->IsA<FIntProperty>() != NULL)
+    {
+        *(int*)(OutParams) = (int)lua_tonumber(L, Index);
+    }
+    else if (Property->IsA<FBoolProperty>() != NULL)
+    {
+        *(bool*)(OutParams) = (bool)lua_toboolean(L, Index);
+    }
+    else if (Property->IsA<FObjectProperty>() != NULL)
+    {
+        *(UObject**)(OutParams) = (UObject*)lua_touserdata(L, Index);
+    }
+    else if (Property->IsA<FStrProperty>() != NULL)
+    {
+        new(OutParams)FString(lua_tostring(L, Index));
+    }
+}
+
+// luaæ ˆçš„å‚æ•°å‹å…¥è™šå¹»ï¼Œå¹¶ä¸”ç»™å‡ºè¿”å›å€¼ç±»å‹
+FProperty* PrepareParmsForUE(lua_State* L, UFunction* Func, BYTE* Params)
 {
     int LuaParamNum = lua_gettop(L);
     int Offset = 0;
@@ -104,13 +136,13 @@ FProperty* PrepareParms(lua_State* L, UFunction* Func, BYTE* Params)
     }
 
     for (TFieldIterator<FProperty> IteratorOfParam(Func); IteratorOfParam; ++IteratorOfParam) {
-        FProperty* Param = *IteratorOfParam;
-        Offset = Param->GetOffset_ForInternal();
+        FProperty* Property = *IteratorOfParam;
+        Offset = Property->GetOffset_ForInternal();
 
         if (Offset >= Func->ReturnValueOffset)
         {
             lua_settop(L, 0);
-            return Param;
+            return Property;
         }
 
         if (i > LuaParamNum)
@@ -118,35 +150,37 @@ FProperty* PrepareParms(lua_State* L, UFunction* Func, BYTE* Params)
             break;
         }
 
-        if (Param->IsA<FFloatProperty>())
-        {
-            *(float*)(Params + Offset) = (float)lua_tonumber(L, i);
-        }
-        else if (Param->IsA<FDoubleProperty>() != NULL)
-        {
-            *(double*)(Params + Offset) = (double)lua_tonumber(L, i);
-        }
-        else if (Param->IsA<FIntProperty>() != NULL)
-        {
-            *(int*)(Params + Offset) = (int)lua_tonumber(L, i);
-        }
-        else if (Param->IsA<FBoolProperty>() != NULL)
-        {
-            *(bool*)(Params + Offset) = (bool)lua_toboolean(L, i);
-        }
-        else if (Param->IsA<FObjectProperty>() != NULL)
-        {
-            *(UObject**)(Params + Offset) = (UObject*)lua_touserdata(L, i);
-        }
-        else if (Param->IsA<FStrProperty>() != NULL)
-        {
-            new(Params + Offset)FString(lua_tostring(L, i));
-        }
+        PullBytesFromLua(L, Property, Params + Offset, i);
 
         i++;
     }
 
     lua_settop(L, 0);
+
+    return NULL;
+}
+
+// è™šå¹»çš„å‚æ•°å‹å…¥luaæ ˆï¼Œå¹¶ä¸”ç»™å‡ºè¿”å›å€¼ç±»å‹
+FProperty* PrepareParmsForLua(lua_State* L, UFunction* Func, BYTE* Params)
+{
+    int Offset = 0;
+
+    if (Func == NULL || Params == NULL)
+    {
+        return NULL;
+    }
+
+    for (TFieldIterator<FProperty> IteratorOfParam(Func); IteratorOfParam; ++IteratorOfParam) {
+        FProperty* Property = *IteratorOfParam;
+        Offset = Property->GetOffset_ForInternal();
+
+        if (Offset >= Func->ReturnValueOffset)
+        {
+            return Property;
+        }
+
+        PushBytesToLua(L, Property, Params + Offset);
+    }
 
     return NULL;
 }
@@ -158,12 +192,30 @@ int LuaCallUFunction(lua_State* L)
 
     BYTE* Parms = (BYTE*)FMemory::Malloc(Func->ParmsSize);
     FMemory::Memzero(Parms, Func->ParmsSize);
-    FProperty* RetType = PrepareParms(L, Func, Parms);
-    Obj->ProcessEvent(Func, Parms); // µ÷ÓÃº¯Êı
-    PushBytesToLua(L, RetType, Parms + Func->ReturnValueOffset); // Ñ¹»Ø·µ»ØÖµ
-    FMemory::Free(Parms); // ÊÍ·Å²ÎÊıÄÚ´æ
+    FProperty* RetType = PrepareParmsForUE(L, Func, Parms);
+    Obj->ProcessEvent(Func, Parms); // è°ƒç”¨å‡½æ•°
+    PushBytesToLua(L, RetType, Parms + Func->ReturnValueOffset); // å‹å›è¿”å›å€¼
+    FMemory::Free(Parms); // é‡Šæ”¾å‚æ•°å†…å­˜
 
     return RetType == NULL ? 0 : 1;
+}
+
+void InternalCallLua(lua_State* L, UFunction* Function, BYTE* Params)
+{
+    FProperty* RetType = PrepareParmsForLua(L, Function, Params);
+
+    const bool bHasReturnParam = Function->ReturnValueOffset != MAX_uint16;
+    BYTE* ReturnValueAddress = bHasReturnParam ? ((BYTE*)Params + Function->ReturnValueOffset) : NULL;
+
+    checkSlow((RetType == NULL) == bHasReturnParam);
+
+    lua_pcall(L, Function->NumParms - bHasReturnParam + 1, bHasReturnParam, 0);
+
+    if (bHasReturnParam)
+    {
+        PullBytesFromLua(L, RetType, ReturnValueAddress, -1);
+        lua_pop(L, 1);
+    }
 }
 
 void PushUFunctionToLua(lua_State* L, UFunction* Func, UObject* Obj)
@@ -178,28 +230,28 @@ void PushUFunctionToLua(lua_State* L, UFunction* Func, UObject* Obj)
  */
 int Class_Index(lua_State* L)
 {
-    // »ñÈ¡ Lua ±í¶ÔÏó
+    // è·å– Lua è¡¨å¯¹è±¡
     luaL_checktype(L, -2, LUA_TTABLE);
 
-    // »ñÈ¡¼üÃû
+    // è·å–é”®å
     const char* key = lua_tostring(L, -1);
     lua_pop(L, 1);
 
-    // ³¢ÊÔ´ÓUObjectÀïÄÃÖµ
-    // ÄÃ¶ÔÓ¦µÄUObjectÖ¸Õë
+    // å°è¯•ä»UObjecté‡Œæ‹¿å€¼
+    // æ‹¿å¯¹åº”çš„UObjectæŒ‡é’ˆ
     lua_pushstring(L, "NativePtr");
     lua_rawget(L, -2);
     if (lua_islightuserdata(L, -1))
     {
         UObject* Obj = (UObject*)lua_touserdata(L, -1);
         lua_pop(L, 1);
-        // ½«¶ÔÓ¦UPropertyµÄÊıÖµÑ¹Õ»
+        // å°†å¯¹åº”UPropertyçš„æ•°å€¼å‹æ ˆ
         FName PropertyName(key);
         for (TFieldIterator<FProperty> Property(Obj->GetClass()); Property; ++Property)
         {
             if (Property->GetFName() == PropertyName)
             {
-                PushUPropertyToLua(L, *Property, Obj); // ÔÙ°ÑÖµÈû½øÈ¥
+                PushUPropertyToLua(L, *Property, Obj); // å†æŠŠå€¼å¡è¿›å»
                 return 1;
             }
         }
@@ -213,7 +265,7 @@ int Class_Index(lua_State* L)
     }
     else
     {
-        lua_pop(L, 1); // µ¯³önil
+        lua_pop(L, 1); // å¼¹å‡ºnil
     }
 
     lua_pushstring(L, "__ClassDesc");
@@ -227,7 +279,7 @@ int Class_Index(lua_State* L)
 
     lua_pushstring(L, key);
     lua_gettable(L, -2);
-    lua_remove(L, -2); // °Ñ__ClassDescÄÃµ½µÄ±íÒÆ³öÈ¥
+    lua_remove(L, -2); // æŠŠ__ClassDescæ‹¿åˆ°çš„è¡¨ç§»å‡ºå»
 
     return 1;
 }
@@ -237,35 +289,16 @@ int Class_Index(lua_State* L)
  */
 int Class_NewIndex(lua_State* L)
 {
-    // »ñÈ¡ Lua ±í¶ÔÏó
+    // è·å– Lua è¡¨å¯¹è±¡
     luaL_checktype(L, 1, LUA_TTABLE);
 
-    // »ñÈ¡¼üÃûºÍÖµ
+    // è·å–é”®åå’Œå€¼
     const char* key = luaL_checkstring(L, 2);
     int value = luaL_checkinteger(L, 3);
 
-    // ÔÚ´Ë´¦¿ÉÒÔÊµÏÖ×Ô¶¨ÒåµÄ¸³ÖµĞĞÎª£¬±ÈÈçÉèÖÃÌØ¶¨µÄ¼ü¶ÔÓ¦µÄÖµ
+    // åœ¨æ­¤å¤„å¯ä»¥å®ç°è‡ªå®šä¹‰çš„èµ‹å€¼è¡Œä¸ºï¼Œæ¯”å¦‚è®¾ç½®ç‰¹å®šçš„é”®å¯¹åº”çš„å€¼
 
-    return 0;  // ·µ»ØÖµÊıÁ¿Îª0
-}
-
-/**
- * Generic closure to call a UFunction
- */
-int Class_CallUFunction(lua_State* L)
-{
-    luaL_checktype(L, 1, LUA_TTABLE);
-    // »ñÈ¡µ÷ÓÃ²ÎÊı
-    int arg1 = luaL_checkinteger(L, 2);
-    int arg2 = luaL_checkinteger(L, 3);
-
-    // ½øĞĞÒ»Ğ©²Ù×÷
-    int sum = arg1 + arg2;
-
-    // ½«½á¹ûÑ¹Èë Lua Õ»
-    lua_pushinteger(L, sum);
-
-    return 1;  // ·µ»ØÖµÊıÁ¿Îª1
+    return 0;  // è¿”å›å€¼æ•°é‡ä¸º0
 }
 
 static void CreateUnrealMetaTable(lua_State* L)
@@ -276,7 +309,7 @@ static void CreateUnrealMetaTable(lua_State* L)
         return;
     }
 
-    // Ã»ÓĞµÄ»°ÏÈ°Ñnilµ¯³ö£¬È»ºó´´½¨Ò»¸ömetatable
+    // æ²¡æœ‰çš„è¯å…ˆæŠŠnilå¼¹å‡ºï¼Œç„¶ååˆ›å»ºä¸€ä¸ªmetatable
     lua_pop(L, 1);
     luaL_newmetatable(L, "__UMT");
     lua_pushvalue(L, -1);
@@ -284,10 +317,6 @@ static void CreateUnrealMetaTable(lua_State* L)
 
     //lua_pushstring(L, "__index");
     //lua_pushcfunction(L, Class_Index);
-    //lua_rawset(L, -3);
-
-    //lua_pushstring(L, "__call");
-    //lua_pushcfunction(L, Class_CallUFunction);
     //lua_rawset(L, -3);
 }
 
@@ -425,7 +454,6 @@ bool LuaEnv::BindInternal(UObject* Object, UClass* Class, const TCHAR* InModuleN
     return BindTableForObject(Object, TCHAR_TO_UTF8(InModuleName));
 }
 
-
 DEFINE_FUNCTION(LuaEnv::execCallLua)
 {
     UFunction* NativeFunc = Stack.CurrentNativeFunction;
@@ -441,21 +469,18 @@ DEFINE_FUNCTION(LuaEnv::execCallLua)
     }
 
     lua_pushstring(L, TCHAR_TO_UTF8(*NativeFunc->GetName()));
-    lua_gettable(L, -2); // ÔÚ±íÖĞ²éÕÒ¶ÔÓ¦º¯Êı
+    lua_gettable(L, -2); // åœ¨è¡¨ä¸­æŸ¥æ‰¾å¯¹åº”å‡½æ•°
     if (lua_isfunction(L, -1))
     {
-        PushUserData(Context); // ½«UObjectµÄÖ¸Õë×÷ÎªSelf²ÎÊı
-        lua_pcall(L, 1, 1, 0);
-        lua_Number LuaRet = lua_tonumber(L, -1);
-        lua_pop(L, 1);
-        UE_LOG(LogTemp, Error, TEXT("Lua Ret %f"), LuaRet);
+        PushUserData(Context); // å°†UObjectçš„æŒ‡é’ˆä½œä¸ºSelfå‚æ•°
+        InternalCallLua(L, NativeFunc, Stack.Locals);
     }
     else
     {
-        lua_pop(L, 1); // µ¯³önil
+        lua_pop(L, 1); // å¼¹å‡ºnil
     }
 
-    lua_pop(L, 1); // µ¯³öTable
+    lua_pop(L, 1); // å¼¹å‡ºTable
 }
 
 void LuaEnv::NotifyUObjectCreated(const UObjectBase* ObjectBase, int Index)
@@ -503,7 +528,7 @@ bool LuaEnv::BindTableForObject(UObject* Object, const char* InModuleName)
     ProjectDir += ".lua";
     //lua_pushstring(L, TCHAR_TO_UTF8(*ProjectDir));
 
-    // µ÷ÓÃrequireº¯Êı£¬Á½¸ö×Ö·û´®²ÎÊıºÍrequireº¯Êı±¾ÉíÔÚÕ»ÉÏ
+    // è°ƒç”¨requireå‡½æ•°ï¼Œä¸¤ä¸ªå­—ç¬¦ä¸²å‚æ•°å’Œrequireå‡½æ•°æœ¬èº«åœ¨æ ˆä¸Š
     //if (lua_pcall(L, 1, 1, 0) != LUA_OK)
     //{
     //    return false;
@@ -511,7 +536,7 @@ bool LuaEnv::BindTableForObject(UObject* Object, const char* InModuleName)
 
     luaL_dofile(L, TCHAR_TO_UTF8(*ProjectDir));
 
-    // ¼ÓÔØ³É¹¦£¬·µ»ØÖµÎª±í
+    // åŠ è½½æˆåŠŸï¼Œè¿”å›å€¼ä¸ºè¡¨
     if (!lua_istable(L, -1))
     {
         return false;
