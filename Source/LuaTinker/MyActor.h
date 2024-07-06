@@ -35,4 +35,11 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	void TestFunc() { UE_LOG(LogTemp, Error, TEXT("Origin TestFunc")); }
+
+	UFUNCTION(BlueprintCallable)
+	int TestFuncWithParam(int p1, FString p2, bool p3)
+	{
+		UE_LOG(LogTemp, Error, TEXT("TestFuncWithParam: %d, %s, %d"), p1, *p2, p3);
+		return p1 + p3;
+	}
 };

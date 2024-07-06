@@ -26,9 +26,14 @@ void PushUPropertyToLua(lua_State* L, FProperty* Property, UObject* Obj)
         float Value = FloatProperty->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<float>(Obj));
         lua_pushnumber(L, Value);
     }
+    else if (FDoubleProperty* DoubleProperty = CastField<FDoubleProperty>(Property))
+    {
+        float Value = DoubleProperty->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<double>(Obj));
+        lua_pushnumber(L, Value);
+    }
     else if (FIntProperty* IntProperty = CastField<FIntProperty>(Property))
     {
-        int32 Value = IntProperty->GetSignedIntPropertyValue(Property->ContainerPtrToValuePtr<int32>(Obj));
+        int Value = IntProperty->GetSignedIntPropertyValue(Property->ContainerPtrToValuePtr<int>(Obj));
         lua_pushnumber(L, Value);
     }
     else if (FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
@@ -48,10 +53,130 @@ void PushUPropertyToLua(lua_State* L, FProperty* Property, UObject* Obj)
     }
 }
 
+void PushBytesToLua(lua_State* L, FProperty* Property, BYTE* Params)
+{
+    if (Property == NULL || Params == NULL)
+    {
+        return;
+    }
+    else if (Property->IsA<FFloatProperty>())
+    {
+        float Value = *(float*)Params;
+        lua_pushnumber(L, Value);
+    }
+    else if (Property->IsA<FDoubleProperty>())
+    {
+        double Value = *(double*)Params;
+        lua_pushnumber(L, Value);
+    }
+    else if (Property->IsA<FIntProperty>())
+    {
+        int Value = *(int*)Params;
+        lua_pushnumber(L, Value);
+    }
+    else if (Property->IsA<FBoolProperty>())
+    {
+        bool Value = *(bool*)Params;
+        lua_pushboolean(L, Value);
+    }
+    else if (Property->IsA<FObjectProperty>())
+    {
+        UObject* Value = *(UObject**)Params;
+        LuaEnv::PushUserData(Value);
+    }
+    else if (Property->IsA<FStrProperty>())
+    {
+        FString Value = *(FString*)Params;
+        lua_pushstring(L, TCHAR_TO_UTF8(*Value));
+    }
+}
+
+// lua栈的参数压入虚幻，并且给出返回值类型
+FProperty* PrepareParms(lua_State* L, UFunction* Func, BYTE* Params)
+{
+    int LuaParamNum = lua_gettop(L);
+    int Offset = 0;
+    int i = 1;
+
+    if (Func == NULL || Params == NULL)
+    {
+        return NULL;
+    }
+
+    for (TFieldIterator<FProperty> IteratorOfParam(Func); IteratorOfParam; ++IteratorOfParam) {
+        FProperty* Param = *IteratorOfParam;
+        Offset = Param->GetOffset_ForInternal();
+
+        if (Offset >= Func->ReturnValueOffset)
+        {
+            lua_settop(L, 0);
+            return Param;
+        }
+
+        if (i > LuaParamNum)
+        {
+            break;
+        }
+
+        if (Param->IsA<FFloatProperty>())
+        {
+            *(float*)(Params + Offset) = (float)lua_tonumber(L, i);
+        }
+        else if (Param->IsA<FDoubleProperty>() != NULL)
+        {
+            *(double*)(Params + Offset) = (double)lua_tonumber(L, i);
+        }
+        else if (Param->IsA<FIntProperty>() != NULL)
+        {
+            *(int*)(Params + Offset) = (int)lua_tonumber(L, i);
+        }
+        else if (Param->IsA<FBoolProperty>() != NULL)
+        {
+            *(bool*)(Params + Offset) = (bool)lua_toboolean(L, i);
+        }
+        else if (Param->IsA<FObjectProperty>() != NULL)
+        {
+            *(UObject**)(Params + Offset) = (UObject*)lua_touserdata(L, i);
+        }
+        else if (Param->IsA<FStrProperty>() != NULL)
+        {
+            new(Params + Offset)FString(lua_tostring(L, i));
+        }
+
+        i++;
+    }
+
+    lua_settop(L, 0);
+
+    return NULL;
+}
+
+int LuaCallUFunction(lua_State* L)
+{
+    UObject*   Obj  = (UObject*)lua_touserdata(L, lua_upvalueindex(1));
+    UFunction* Func = (UFunction*)lua_touserdata(L, lua_upvalueindex(2));
+
+    BYTE* Parms = (BYTE*)FMemory::Malloc(Func->ParmsSize);
+    FMemory::Memzero(Parms, Func->ParmsSize);
+    FProperty* RetType = PrepareParms(L, Func, Parms);
+    Obj->ProcessEvent(Func, Parms); // 调用函数
+    PushBytesToLua(L, RetType, Parms + Func->ReturnValueOffset); // 压回返回值
+    FMemory::Free(Parms); // 释放参数内存
+
+    return RetType == NULL ? 0 : 1;
+}
+
+void PushUFunctionToLua(lua_State* L, UFunction* Func, UObject* Obj)
+{
+    lua_pushlightuserdata(L, Obj);
+    lua_pushlightuserdata(L, Func);
+    lua_pushcclosure(L, LuaCallUFunction, 2);
+}
+
 /**
  * __index meta methods for class
  */
-int32 Class_Index(lua_State* L)
+int Class_Index(lua_State* L)
 {
     // 获取 Lua 表对象
     luaL_checktype(L, -2, LUA_TTABLE);
@@ -78,6 +203,13 @@ int32 Class_Index(lua_State* L)
                 return 1;
             }
         }
+
+        UFunction* UFunc = Obj->FindFunction(PropertyName);
+        if (UFunc)
+        {
+            PushUFunctionToLua(L, UFunc, Obj);
+            return 1;
+        }
     }
     else
     {
@@ -103,7 +235,7 @@ int32 Class_Index(lua_State* L)
 /**
  * __newindex meta methods for class
  */
-int32 Class_NewIndex(lua_State* L)
+int Class_NewIndex(lua_State* L)
 {
     // 获取 Lua 表对象
     luaL_checktype(L, 1, LUA_TTABLE);
@@ -120,7 +252,7 @@ int32 Class_NewIndex(lua_State* L)
 /**
  * Generic closure to call a UFunction
  */
-int32 Class_CallUFunction(lua_State* L)
+int Class_CallUFunction(lua_State* L)
 {
     luaL_checktype(L, 1, LUA_TTABLE);
     // 获取调用参数
@@ -324,10 +456,9 @@ DEFINE_FUNCTION(LuaEnv::execCallLua)
     }
 
     lua_pop(L, 1); // 弹出Table
-    print_lua_stack(L);
 }
 
-void LuaEnv::NotifyUObjectCreated(const UObjectBase* ObjectBase, int32 Index)
+void LuaEnv::NotifyUObjectCreated(const UObjectBase* ObjectBase, int Index)
 {
     static UClass* InterfaceClass = AMyActor::StaticClass();
     if (!ObjectBase->GetClass()->IsChildOf<AMyActor>())
