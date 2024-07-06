@@ -22,7 +22,7 @@ protected:
 
 public:
 	static void PushUserData(UObject* Object);
-	bool BindTableForObject(UObject* Object, const char* InModuleName);
+	bool LoadTableForObject(UObject* Object, const char* InModuleName);
 
 public:
 	LuaEnv();

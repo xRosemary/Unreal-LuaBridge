@@ -5,6 +5,8 @@
 #include "MyActor.h"
 #include "Kismet/KismetSystemLibrary.h"
 
+UE_DISABLE_OPTIMIZATION
+
 int print_lua_stack(lua_State* L) {
     int top = lua_gettop(L); // 获取堆栈顶部索引
     
@@ -448,16 +450,27 @@ bool LuaEnv::BindInternal(UObject* Object, UClass* Class, const TCHAR* InModuleN
 
     UE_LOG(LogTemp, Error, TEXT("InModuleName: %s"), InModuleName);
 
-    // functions
+    bool IsLoad = LoadTableForObject(Object, TCHAR_TO_UTF8(InModuleName));
+    if (!IsLoad)
+    {
+        return false;
+    }
+
+    // 函数重载
     for (TFieldIterator<UFunction> It(Class, EFieldIteratorFlags::IncludeSuper, EFieldIteratorFlags::ExcludeDeprecated, EFieldIteratorFlags::ExcludeInterfaces); It; ++It)
     {
-        if (It->GetName() == FString("TestFunc"))
+        lua_pushstring(L, TCHAR_TO_UTF8(*It->GetName()));
+        lua_rawget(L, -2);
+
+        if (lua_isfunction(L, -1))
         {
             It->SetNativeFunc(&LuaEnv::execCallLua);
         }
+        
+        lua_pop(L, 1);
     }
 
-    return BindTableForObject(Object, TCHAR_TO_UTF8(InModuleName));
+    return true;
 }
 
 DEFINE_FUNCTION(LuaEnv::execCallLua)
@@ -526,8 +539,16 @@ void LuaEnv::PushUserData(UObject* Object)
     }
 }
 
-bool LuaEnv::BindTableForObject(UObject* Object, const char* InModuleName)
+bool LuaEnv::LoadTableForObject(UObject* Object, const char* InModuleName)
 {
+    lua_getglobal(L, InModuleName);
+    if (lua_istable(L, -1)) // 已经有了
+    {
+        return true;
+    }
+
+    lua_settop(L, 0);
+
     //lua_getglobal(L, "require");
     FString ProjectDir = UKismetSystemLibrary::GetProjectDirectory();
     ProjectDir += InModuleName;
@@ -545,11 +566,11 @@ bool LuaEnv::BindTableForObject(UObject* Object, const char* InModuleName)
     // 加载成功，返回值为表
     if (!lua_istable(L, -1))
     {
+        lua_settop(L, 0);
         return false;
     }
 
+    lua_pushvalue(L, -1);
     lua_setglobal(L, InModuleName);
-    lua_pop(L, 1);
-
     return true;
 }
