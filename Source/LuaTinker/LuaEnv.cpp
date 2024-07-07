@@ -55,6 +55,49 @@ void PushUPropertyToLua(lua_State* L, FProperty* Property, UObject* Obj)
     }
 }
 
+void PullUPropertyFromLua(lua_State* L, FProperty* Property, UObject* Obj)
+{
+    if (FFloatProperty* FloatProperty = CastField<FFloatProperty>(Property))
+    {
+        double Value = lua_tonumber(L, -1);
+        FloatProperty->SetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<float>(Obj), Value);
+    }
+    else if (FDoubleProperty* DoubleProperty = CastField<FDoubleProperty>(Property))
+    {
+        double Value = lua_tonumber(L, -1);
+        DoubleProperty->SetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<double>(Obj), Value);
+    }
+    else if (FIntProperty* IntProperty = CastField<FIntProperty>(Property))
+    {
+        int Value = lua_tointeger(L, -1);
+        IntProperty->SetPropertyValue(Property->ContainerPtrToValuePtr<int>(Obj), Value);
+    }
+    else if (FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
+    {
+        bool Value = !!lua_toboolean(L, -1);
+        IntProperty->SetPropertyValue(Property->ContainerPtrToValuePtr<void>(Obj), Value);
+    }
+    else if (FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
+    {
+        if (lua_istable(L, -1))
+        {
+            lua_pushstring(L, "NativePtr");
+            lua_rawget(L, -2);
+            UObject* Value = (UObject*)lua_touserdata(L, -1);
+            lua_pop(L, 1);
+            if (IsValid(Value))
+            {
+                ObjectProperty->SetPropertyValue(Property->ContainerPtrToValuePtr<UObject*>(Obj), Value);
+            }
+        }
+    }
+    else if (FStrProperty* StringProperty = CastField<FStrProperty>(Property))
+    {
+        FString Value(lua_tostring(L, -1));
+        StringProperty->SetPropertyValue(Property->ContainerPtrToValuePtr<FString>(Obj), Value);
+    }
+}
+
 void PushBytesToLua(lua_State* L, FProperty* Property, BYTE* Params)
 {
     if (Property == NULL || Params == NULL)
@@ -302,14 +345,36 @@ int Class_Index(lua_State* L)
 int Class_NewIndex(lua_State* L)
 {
     // 获取 Lua 表对象
-    luaL_checktype(L, 1, LUA_TTABLE);
+    luaL_checktype(L, -3, LUA_TTABLE);
 
-    // 获取键名和值
-    const char* key = luaL_checkstring(L, 2);
+    // 获取键名
+    const char* key = lua_tostring(L, -2);
 
-    int value = luaL_checkinteger(L, 3);
+    lua_pushvalue(L, -3); // 把表再放一个在lua栈上面，方便后续查找
 
-    // 在此处可以实现自定义的赋值行为，比如设置特定的键对应的值
+    // 尝试从UObject里拿值
+    // 拿对应的UObject指针
+    lua_pushstring(L, "NativePtr");
+    lua_rawget(L, -2);
+    if (!lua_islightuserdata(L, -1))
+    {
+        lua_settop(L, 3);
+        return 0;
+    }
+
+    UObject* Obj = (UObject*)lua_touserdata(L, -1);
+    lua_settop(L, 3);
+
+    // 修改对应UProperty的数值
+    FName PropertyName(key);
+    for (TFieldIterator<FProperty> Property(Obj->GetClass()); Property; ++Property)
+    {
+        if (Property->GetFName() == PropertyName)
+        {
+            PullUPropertyFromLua(L, *Property, Obj);
+            break;
+        }
+    }
 
     return 0;  // 返回值数量为0
 }
@@ -538,6 +603,10 @@ void LuaEnv::PushUserData(UObject* Object)
 
     lua_pushstring(L, "__index");
     lua_pushcfunction(L, Class_Index);
+    lua_rawset(L, -3);
+
+    lua_pushstring(L, "__newindex");
+    lua_pushcfunction(L, Class_NewIndex);
     lua_rawset(L, -3);
 
     lua_pushvalue(L, -1);
