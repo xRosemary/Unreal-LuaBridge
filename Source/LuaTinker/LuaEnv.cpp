@@ -243,7 +243,8 @@ int Class_Index(lua_State* L)
 
     // 获取键名
     const char* key = lua_tostring(L, -1);
-    lua_pop(L, 1);
+
+    lua_pushvalue(L, -2); // 把表再放一个在lua栈上面，方便后续查找
 
     // 尝试从UObject里拿值
     // 拿对应的UObject指针
@@ -259,6 +260,7 @@ int Class_Index(lua_State* L)
         {
             if (Property->GetFName() == PropertyName)
             {
+                lua_pop(L, 1);
                 PushUPropertyToLua(L, *Property, Obj); // 再把值塞进去
                 return 1;
             }
@@ -267,6 +269,7 @@ int Class_Index(lua_State* L)
         UFunction* UFunc = Obj->FindFunction(PropertyName);
         if (UFunc)
         {
+            lua_pop(L, 1);
             PushUFunctionToLua(L, UFunc, Obj);
             return 1;
         }
@@ -280,14 +283,15 @@ int Class_Index(lua_State* L)
     lua_rawget(L, -2);
     if (!lua_istable(L, -1))
     {
-        lua_pop(L, 1);
+        lua_pop(L, 2);
         lua_pushnil(L);
         return 1;
     }
 
-    lua_pushstring(L, key);
+    lua_pushvalue(L, -3); // 压入key
     lua_gettable(L, -2);
     lua_remove(L, -2); // 把__ClassDesc拿到的表移出去
+    lua_remove(L, -2); // 把多压的拷贝表移出去
 
     return 1;
 }
@@ -302,6 +306,7 @@ int Class_NewIndex(lua_State* L)
 
     // 获取键名和值
     const char* key = luaL_checkstring(L, 2);
+
     int value = luaL_checkinteger(L, 3);
 
     // 在此处可以实现自定义的赋值行为，比如设置特定的键对应的值
