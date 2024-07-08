@@ -466,8 +466,11 @@ LuaEnv::LuaEnv()
 
 LuaEnv::~LuaEnv()
 {
-    lua_close(L);
-    L = nullptr;
+    if (L)
+    {
+        lua_close(L);
+        L = nullptr;
+    }
 }
 
 bool LuaEnv::TryToBind(UObject* Object)
