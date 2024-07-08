@@ -546,7 +546,6 @@ bool LuaEnv::BindInternal(UObject* Object, UClass* Class, const TCHAR* InModuleN
 DEFINE_FUNCTION(LuaEnv::execCallLua)
 {
     UFunction* NativeFunc = Stack.CurrentNativeFunction;
-    //P_FINISH;
 
     UE_LOG(LogTemp, Error, TEXT("execCallLua: Obj %s, Native Func %s"), *Context->GetName(), *NativeFunc->GetName());
 
@@ -554,6 +553,7 @@ DEFINE_FUNCTION(LuaEnv::execCallLua)
     if (lua_getglobal(L, ModuleName) != LUA_TTABLE)
     {
         lua_pop(L, 1);
+        P_FINISH;
         return;
     }
 
@@ -626,7 +626,8 @@ void LuaEnv::PushUserData(UObject* Object)
 
 bool LuaEnv::LoadTableForObject(UObject* Object, const char* InModuleName)
 {
-    lua_getglobal(L, InModuleName);
+    const char* TableName = TCHAR_TO_UTF8(*Object->GetClass()->GetName());
+    lua_getglobal(L, TableName);
     if (lua_istable(L, -1)) // 已经有了
     {
         return true;
@@ -656,6 +657,6 @@ bool LuaEnv::LoadTableForObject(UObject* Object, const char* InModuleName)
     }
 
     lua_pushvalue(L, -1);
-    lua_setglobal(L, InModuleName);
+    lua_setglobal(L, TableName);
     return true;
 }
