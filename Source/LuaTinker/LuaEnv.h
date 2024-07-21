@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-
+#include "LuaCore.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,27 +15,30 @@ extern "C" {
 }
 #endif
 
-class LUATINKER_API LuaEnv : public FUObjectArray::FUObjectCreateListener
+namespace LuaBridge
 {
-protected:
-	inline static lua_State* L = nullptr;
+	class LUATINKER_API LuaEnv : public FUObjectArray::FUObjectCreateListener
+	{
+	protected:
+		inline static lua_State* L = nullptr;
 
-public:
-	static void PushUserData(UObject* Object);
-	bool LoadTableForObject(UObject* Object, const char* InModuleName);
+	public:
+		static void PushUserData(UObject* Object);
+		bool LoadTableForObject(UObject* Object, const char* InModuleName);
 
-public:
-	LuaEnv();
-	~LuaEnv();
+	public:
+		LuaEnv();
+		~LuaEnv();
 
-	bool TryToBind(UObject* Object);
-	bool BindInternal(UObject* Object, UClass* Class, const TCHAR* InModuleName);
+		bool TryToBind(UObject* Object);
+		bool BindInternal(UObject* Object, UClass* Class, const TCHAR* InModuleName);
 
-	virtual void NotifyUObjectCreated(const class UObjectBase* Object, int32 Index);
+		virtual void NotifyUObjectCreated(const class UObjectBase* Object, int32 Index);
 
-	virtual void OnUObjectArrayShutdown() { GUObjectArray.RemoveUObjectCreateListener(this); IsActive = false;  };
+		virtual void OnUObjectArrayShutdown() { GUObjectArray.RemoveUObjectCreateListener(this); IsActive = false; };
 
-	bool IsActive = false;
+		bool IsActive = false;
 
-	DECLARE_FUNCTION(execCallLua);
-};
+		DECLARE_FUNCTION(execCallLua);
+	};
+}

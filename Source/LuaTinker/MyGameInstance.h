@@ -19,5 +19,5 @@ public:
 	virtual void Init();
 	virtual void Shutdown();
 
-	LuaEnv Env;
+	LuaBridge::LuaEnv Env;
 };
