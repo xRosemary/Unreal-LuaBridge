@@ -1,6 +1,8 @@
 #include "LuaCore.h"
 #include "UEObjectReferencer.h"
 
+UE_DISABLE_OPTIMIZATION
+
 namespace LuaBridge
 {
     void PushBytesToLua(lua_State* L, FProperty* Property, BYTE* Params)
@@ -65,7 +67,7 @@ namespace LuaBridge
         }
         else if (Property->IsA<FObjectProperty>() != NULL)
         {
-            *(UObject**)(OutParams) = (UObject*)lua_touserdata(L, Index);
+            *(UObject**)(OutParams) = GetUObjectFromLuaInstance(L, Index);
         }
         else if (Property->IsA<FStrProperty>() != NULL)
         {
@@ -177,6 +179,7 @@ namespace LuaBridge
             return;
         }
 
+        lua_pop(L, 1);
         luaL_newmetatable(L, "__MetaUObject");
 
         lua_pushstring(L, "StaticClass");               // Key
@@ -209,11 +212,12 @@ namespace LuaBridge
 
         GetRegistryTable(L, "__ObjectMap");
         lua_pushlightuserdata(L, Object);
+        lua_pushvalue(L, -1);
 
-        lua_rawget(L, -2);
+        lua_rawget(L, -3);
         if (!lua_isnil(L, -1))
         {
-            lua_pop(L, 2);
+            lua_pop(L, 3);
             return;
         }
 
@@ -241,6 +245,7 @@ namespace LuaBridge
         lua_setmetatable(L, -2);                                        // 将 meta table 设为自己
 
         lua_rawset(L, -3);                                              // ObjectMap.ObjectPtr = Instance
+        lua_pop(L, 1);
     }
 
     void UnRegisterObjectToLua(lua_State* L, UObject* Object)
