@@ -38,8 +38,8 @@ namespace LuaBridge
 
 	// 从"ObjectMap"里获取UObject对应的lua表实例
 	extern bool GetObjectLuaInstance(lua_State* L, UObject* Object);
-	// 获取lua表实例对应的UObject指针
-	extern UObject* GetUObjectFromLuaInstance(lua_State* L, int Index);
+	// 获取lua代理对象对应的UObject指针
+	extern UObject* GetUObjectFromLuaProxy(lua_State* L, int Index);
 	// 将UObject压入lua栈中
 	extern void PushUObject(lua_State* L, UObject* Object);
 	extern void PushObjectModule(lua_State* L, UObject* Object);
@@ -54,11 +54,12 @@ namespace LuaBridge
 	// UObject 的 Userdata 里自带的方法
 	extern int UObject_Index(lua_State* L);
 	extern int UObject_StaticClass(lua_State* L);
-	extern int UObject_Cast(lua_State* L);
-	extern int UObject_Identical(lua_State* L);
-	extern int UObject_Delete(lua_State* L);
 
 	// UObject 对应的 Lua Instance 里自带的方法
 	extern int LuaInstance_Index(lua_State* L);
 	extern int LuaInstance_NewIndex(lua_State* L);
+
+	// Lua Instance 对应的 代理对象 里自带的方法
+	extern int LuaProxy_Identical(lua_State* L);
+	extern int LuaProxy_Delete(lua_State* L);
 }

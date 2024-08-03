@@ -25,17 +25,9 @@ public:
         return ReferencedObjects.Find(Object);
     }
 
-    int* RemoveObjectRef(UObject *Object)
+    void RemoveObjectRef(UObject *Object, int* RefKey)
     {
-        int RefKey = 0;
-        if (ReferencedObjects.RemoveAndCopyValue(Object, RefKey))
-        {
-            return &RefKey;
-        }
-        else
-        {
-            return NULL;
-        }
+        ReferencedObjects.RemoveAndCopyValue(Object, *RefKey);
     }
 
     void Cleanup()

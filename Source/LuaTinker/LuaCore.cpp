@@ -69,7 +69,7 @@ namespace LuaBridge
         }
         else if (Property->IsA<FObjectProperty>() != NULL)
         {
-            *(UObject**)(OutParams) = GetUObjectFromLuaInstance(L, Index);
+            *(UObject**)(OutParams) = GetUObjectFromLuaProxy(L, Index);
         }
         else if (Property->IsA<FStrProperty>() != NULL)
         {
@@ -189,18 +189,6 @@ namespace LuaBridge
         lua_pushcclosure(L, UObject_StaticClass, 1);    // closure
         lua_rawset(L, -3);
 
-        lua_pushstring(L, "Cast");                      // Key
-        lua_pushcfunction(L, UObject_Cast);             // C function
-        lua_rawset(L, -3);
-
-        lua_pushstring(L, "__eq");                      // Key
-        lua_pushcfunction(L, UObject_Identical);        // C function
-        lua_rawset(L, -3);
-
-        lua_pushstring(L, "__gc");                      // Key
-        lua_pushcfunction(L, UObject_Delete);           // C function
-        lua_rawset(L, -3);
-
         lua_pushstring(L, "__index");                   // Key
         lua_pushcfunction(L, UObject_Index);            // C function
         lua_rawset(L, -3);
@@ -262,6 +250,14 @@ namespace LuaBridge
         lua_pushvalue(L, -4);
         lua_rawset(L, -3);                                              // ProxyMeta.__newindex = Lua Instance
 
+        lua_pushstring(L, "__eq");
+        lua_pushcfunction(L, LuaProxy_Identical);
+        lua_rawset(L, -3);
+
+        lua_pushstring(L, "__gc");
+        lua_pushcfunction(L, LuaProxy_Delete);
+        lua_rawset(L, -3);
+
         lua_setmetatable(L, -2);                                        // setmetatable(Proxy, ProxyMeta);
         
         lua_remove(L, -2);                                              // 移除 Lua Instance
@@ -293,7 +289,8 @@ namespace LuaBridge
         lua_rawset(L, -3);                                          // ObjectMap.ObjectPtr = nil
         lua_pop(L, 1);
 
-        int* RefKey = GObjectReferencer.RemoveObjectRef(Object);
+        int* RefKey = NULL;
+        GObjectReferencer.RemoveObjectRef(Object, RefKey);
         if (RefKey)
         {
             luaL_unref(L, LUA_REGISTRYINDEX, *RefKey);
@@ -316,7 +313,7 @@ namespace LuaBridge
         return !!lua_isnil(L, -1);
     }
 
-    UObject* GetUObjectFromLuaInstance(lua_State* L, int Index)
+    UObject* GetUObjectFromLuaProxy(lua_State* L, int Index)
     {
         if (!lua_istable(L, Index))
         {
@@ -496,7 +493,7 @@ namespace LuaBridge
 
     int Global_LuaUnRef(lua_State* L)
     {
-        UObject* Object = GetUObjectFromLuaInstance(L, -1);
+        UObject* Object = GetUObjectFromLuaProxy(L, -1);
         lua_pop(L, 1);
         if (!Object)
         {
@@ -516,7 +513,6 @@ namespace LuaBridge
 
         // 获取键名
         const char* key = lua_tostring(L, -1);
-
         
         // 将对应UProperty的数值压栈
         FName PropertyName(key);
@@ -524,7 +520,6 @@ namespace LuaBridge
         {
             if (Property->GetFName() == PropertyName)
             {
-                lua_pop(L, 1);
                 PushUPropertyToLua(L, *Property, Object); // 再把值塞进去
                 return 1;
             }
@@ -533,7 +528,6 @@ namespace LuaBridge
         UFunction* UFunc = Object->FindFunction(PropertyName);
         if (UFunc)
         {
-            lua_pop(L, 1);
             PushUFunctionToLua(L, UFunc, Object);
             return 1;
         }
@@ -586,34 +580,7 @@ namespace LuaBridge
         return 1;
     }
 
-    int UObject_Cast(lua_State* L)
-    {
-        int NumParams = lua_gettop(L);
-        if (NumParams < 2)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("%s: Invalid parameters!"), ANSI_TO_TCHAR(__FUNCTION__));
-            return 0;
-        }
-
-        UObject* Object = GetUObjectFromLuaInstance(L, 1);
-        if (!Object)
-        {
-            return 0;
-        }
-
-        UClass* Class = Cast<UClass>(GetUObjectFromLuaInstance(L, 2));
-        if (Class && (Object->IsA(Class) || (Class->HasAnyClassFlags(CLASS_Interface) && Class != UInterface::StaticClass() && Object->GetClass()->ImplementsInterface(Class))))
-        {
-            lua_pushvalue(L, 1);
-        }
-        else
-        {
-            lua_pushnil(L);
-        }
-        return 1;
-    }
-    
-    int UObject_Identical(lua_State* L)
+    int LuaProxy_Identical(lua_State* L)
     {
         const int NumParams = lua_gettop(L);
         if (NumParams != 2)
@@ -625,14 +592,14 @@ namespace LuaBridge
             return 1;
         }
 
-        const UObject* A = GetUObjectFromLuaInstance(L, 1);
+        const UObject* A = GetUObjectFromLuaProxy(L, 1);
         if (!A)
         {
             lua_pushboolean(L, false);
             return 1;
         }
 
-        const UObject* B = GetUObjectFromLuaInstance(L, 2);
+        const UObject* B = GetUObjectFromLuaProxy(L, 2);
         if (!B)
         {
             lua_pushboolean(L, false);
@@ -643,9 +610,9 @@ namespace LuaBridge
         return 1;
     }
     
-    int UObject_Delete(lua_State* L)
+    int LuaProxy_Delete(lua_State* L)
     {
-        UObject* Object = GetUObjectFromLuaInstance(L, 1);
+        UObject* Object = GetUObjectFromLuaProxy(L, 1);
         UnRegisterObjectToLua(L, Object);
         return 0;
     }
