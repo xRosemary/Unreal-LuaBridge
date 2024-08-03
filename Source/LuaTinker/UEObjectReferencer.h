@@ -10,14 +10,32 @@
 class FObjectReferencer : public FGCObject
 {
 public:
-    void AddObjectRef(UObject *Object)
+    void AddObjectRef(UObject *Object, int RefKey)
     {
-        ReferencedObjects.Add(Object, true);
+        if(Object == NULL)
+        {
+            return;
+        }
+
+        ReferencedObjects.Add(Object, RefKey);
     }
 
-    void RemoveObjectRef(UObject *Object)
+    int* FindObjectRef(UObject *Object)
     {
-        ReferencedObjects.Remove(Object);
+        return ReferencedObjects.Find(Object);
+    }
+
+    int* RemoveObjectRef(UObject *Object)
+    {
+        int RefKey = 0;
+        if (ReferencedObjects.RemoveAndCopyValue(Object, RefKey))
+        {
+            return &RefKey;
+        }
+        else
+        {
+            return NULL;
+        }
     }
 
     void Cleanup()
@@ -44,7 +62,7 @@ public:
 private:
     FObjectReferencer() {}
 
-    TMap<UObject*, bool> ReferencedObjects;
+    TMap<UObject*, int> ReferencedObjects;
 };
 
 #ifndef GObjectReferencer

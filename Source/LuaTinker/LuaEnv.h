@@ -23,7 +23,6 @@ namespace LuaBridge
 		inline static lua_State* L = nullptr;
 
 	public:
-		static void PushUserData(UObject* Object);
 		bool LoadTableForObject(UObject* Object, const char* InModuleName);
 
 	public:

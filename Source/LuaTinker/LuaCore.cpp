@@ -5,6 +5,8 @@ UE_DISABLE_OPTIMIZATION
 
 namespace LuaBridge
 {
+    static const char* REGISTRY_KEY = "__ObjectMap";
+
     void PushBytesToLua(lua_State* L, FProperty* Property, BYTE* Params)
     {
         if (Property == NULL || Params == NULL)
@@ -206,22 +208,10 @@ namespace LuaBridge
         lua_setmetatable(L, -2);
     }
 
-    void RegisterObjectToLua(lua_State* L, UObject* Object)
+    // 创建UObject对应的lua实例，Lua栈元素+1
+    static void PushObjectInstance(lua_State* L, UObject* Object)
     {
         check(Object);
-
-        GetRegistryTable(L, "__ObjectMap");
-        lua_pushlightuserdata(L, Object);
-        lua_pushvalue(L, -1);
-
-        lua_rawget(L, -3);
-        if (!lua_isnil(L, -1))
-        {
-            lua_pop(L, 3);
-            return;
-        }
-
-        lua_pop(L, 1);
 
         lua_newtable(L);                                                // 创建实例 Instance
 
@@ -244,8 +234,37 @@ namespace LuaBridge
         lua_pushvalue(L, -1);
         lua_setmetatable(L, -2);                                        // 将 meta table 设为自己
 
-        lua_rawset(L, -3);                                              // ObjectMap.ObjectPtr = Instance
-        lua_pop(L, 1);
+        lua_pushvalue(L, -1);
+        int RefKey = luaL_ref(L, LUA_REGISTRYINDEX);
+        GObjectReferencer.AddObjectRef(Object, RefKey);                 // 记一下两边的强引用，避免被GC
+    }
+
+    void PushInstanceProxy(lua_State* L, UObject* Object)
+    {
+        int* TableRef = GObjectReferencer.FindObjectRef(Object);
+        if (TableRef)
+        {
+            lua_rawgeti(L, LUA_REGISTRYINDEX, *TableRef);               // Lua Instance
+        }
+        else
+        {
+            PushObjectInstance(L, Object);
+        }
+
+        lua_newtable(L);                                                // Instance 的代理对象
+        lua_newtable(L);                                                // 代理对象的 Metatable
+
+        lua_pushstring(L, "__index");
+        lua_pushvalue(L, -4);
+        lua_rawset(L, -3);                                              // ProxyMeta.__index = Lua Instance
+
+        lua_pushstring(L, "__newindex");
+        lua_pushvalue(L, -4);
+        lua_rawset(L, -3);                                              // ProxyMeta.__newindex = Lua Instance
+
+        lua_setmetatable(L, -2);                                        // setmetatable(Proxy, ProxyMeta);
+        
+        lua_remove(L, -2);                                              // 移除 Lua Instance
     }
 
     void UnRegisterObjectToLua(lua_State* L, UObject* Object)
@@ -255,31 +274,30 @@ namespace LuaBridge
             return;
         }
 
-        GetRegistryTable(L, "__ObjectMap");
+        GetRegistryTable(L, REGISTRY_KEY, true);
 
         lua_pushlightuserdata(L, Object);
         lua_rawget(L, -2);                                          // ObjectMap.ObjectPtr
-
-        if (lua_isnil(L, -1))
-        {
-            lua_pop(L, 2);
-            return;
-        }
 
         if (lua_istable(L, -1))
         {
             lua_pushstring(L, "__NativePtr");
             lua_pushnil(L);
-            lua_rawset(L, -3);                                      // Instance.__NativePtr = nil
-            lua_pop(L, 1);
+            lua_settable(L, -3);                                    // Instance.__NativePtr = nil
         }
+
+        lua_pop(L, 1);
 
         lua_pushlightuserdata(L, Object);
         lua_pushnil(L);
         lua_rawset(L, -3);                                          // ObjectMap.ObjectPtr = nil
         lua_pop(L, 1);
 
-        GObjectReferencer.RemoveObjectRef(Object);
+        int* RefKey = GObjectReferencer.RemoveObjectRef(Object);
+        if (RefKey)
+        {
+            luaL_unref(L, LUA_REGISTRYINDEX, *RefKey);
+        }
     }
 
     bool GetObjectLuaInstance(lua_State* L, UObject* Object)
@@ -290,7 +308,7 @@ namespace LuaBridge
             return false;
         }
 
-        GetRegistryTable(L, "__ObjectMap");
+        GetRegistryTable(L, REGISTRY_KEY, true);
         lua_pushlightuserdata(L, Object);
         lua_rawget(L, -2);
         lua_remove(L, -2);
@@ -307,9 +325,8 @@ namespace LuaBridge
 
         void* Userdata = NULL;
 
-        lua_pushstring(L, "__NativePtr");
-        lua_rawget(L, Index);
-        if (lua_islightuserdata(L, -1))
+        lua_getfield(L, Index, "__NativePtr");
+        if (lua_isuserdata(L, -1))
         {
             Userdata = lua_touserdata(L, -1);           // get the raw UObject
         }
@@ -324,13 +341,32 @@ namespace LuaBridge
         return *((UObject**)Userdata);
     }
 
-    void GetRegistryTable(lua_State* L, const char* TableName)
+    static void CreateWeakValueTable(lua_State* L)
+    {
+        lua_newtable(L);
+        lua_newtable(L);
+        lua_pushstring(L, "__mode");
+        lua_pushstring(L, "v");
+        lua_rawset(L, -3);
+        lua_setmetatable(L, -2);
+    }
+
+    void GetRegistryTable(lua_State* L, const char* TableName, bool IsWeakTable)
     {
         lua_getfield(L, LUA_REGISTRYINDEX, TableName);
         if (lua_isnil(L, -1))
         {
             lua_pop(L, 1);
-            lua_newtable(L);
+
+            if (IsWeakTable)
+            {
+                CreateWeakValueTable(L);
+            }
+            else
+            {
+                lua_newtable(L);
+            }
+
             lua_pushvalue(L, -1);
             lua_setfield(L, LUA_REGISTRYINDEX, TableName);
         }
@@ -344,12 +380,20 @@ namespace LuaBridge
             return;
         }
 
-        RegisterObjectToLua(L, Object);
-
-        GetRegistryTable(L, "__ObjectMap");
+        GetRegistryTable(L, REGISTRY_KEY, true);
         lua_pushlightuserdata(L, Object);
         lua_rawget(L, -2);
-        lua_remove(L, -2);
+
+        if (lua_isnil(L, -1))
+        {
+            lua_pop(L, 1);
+            PushInstanceProxy(L, Object);           // 此时栈顶为 Lua Instance Proxy
+            lua_pushlightuserdata(L, Object);
+            lua_pushvalue(L, -2);                   // 拷贝一份 Lua Instance Proxy
+            lua_rawset(L, -4);                      // ObjectMap.ObjectPtr = Instance Proxy
+        }
+
+        lua_remove(L, -2);                          // 移除 ObjectMap
     }
 
     void PushObjectModule(lua_State* L, UObject* Object)
@@ -450,27 +494,6 @@ namespace LuaBridge
     // }
 #pragma endregion
 
-    int Global_LuaRef(lua_State* L)
-    {
-        UObject* Object = GetUObjectFromLuaInstance(L, -1);
-        lua_pop(L, 1);
-        if (!Object)
-        {
-            return 0;
-        }
-
-        // Object Map 上的引用置空
-        GetRegistryTable(L, "__ObjectMap");
-        lua_pushlightuserdata(L, Object);
-        lua_pushnil(L);
-        lua_rawset(L, -3);
-        lua_pop(L, 1);
-
-        // 让 GObjectReferencer 持有引用，避免GC
-        GObjectReferencer.AddObjectRef(Object);
-        return 0;
-    }
-
     int Global_LuaUnRef(lua_State* L)
     {
         UObject* Object = GetUObjectFromLuaInstance(L, -1);
@@ -480,7 +503,7 @@ namespace LuaBridge
             return 0;
         }
 
-        GObjectReferencer.RemoveObjectRef(Object);
+        UnRegisterObjectToLua(L, Object);
         return 0;
     }
 
@@ -589,6 +612,7 @@ namespace LuaBridge
         }
         return 1;
     }
+    
     int UObject_Identical(lua_State* L)
     {
         const int NumParams = lua_gettop(L);
@@ -676,7 +700,9 @@ namespace LuaBridge
             return 0;
         }
 
-        lua_rawset(L, -3);
+        lua_pushvalue(L, 2);
+        lua_pushvalue(L, 3);
+        lua_rawset(L, 1);
         return 0;
     }
 }

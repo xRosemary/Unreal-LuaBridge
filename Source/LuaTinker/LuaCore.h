@@ -25,16 +25,16 @@ namespace LuaBridge
 	// 将栈顶的lua表放到全局表里的UE表中
 	extern void SetTableForClass(lua_State* L, const char* Name);
 
-	// 将一个在虚幻持有引用的UObject放到lua的注册表中
-	// 此时lua不持有这个UObject的引用，所以会正常被虚幻释放
-	// 可以理解为lua里有一个UObject的影子对象
-	extern void RegisterObjectToLua(lua_State* L, UObject* Object);
+	// 创建UObject对应的Lua Instance的代理表
+	// 代理表触发GC时会删除相应的Lua Instance，以及GObjectReferencer中的强引用
+	// 这样使得两边都能释放干净
+	extern void PushInstanceProxy(lua_State* L, UObject* Object);
 
 	// 虚幻端主动GC时，删除lua的注册表里相应的UObject对象
 	extern void UnRegisterObjectToLua(lua_State* L, UObject* Object);
 
 	// 获取注册表里的表
-	extern void GetRegistryTable(lua_State* L, const char* TableName);
+	extern void GetRegistryTable(lua_State* L, const char* TableName, bool IsWeakTable = false);
 
 	// 从"ObjectMap"里获取UObject对应的lua表实例
 	extern bool GetObjectLuaInstance(lua_State* L, UObject* Object);
@@ -48,8 +48,6 @@ namespace LuaBridge
 	// extern int Global_LoadClass(lua_State *L);
 	// extern int Global_NewObject(lua_State *L);
 
-	// Lua持有UObject的引用
-	extern int Global_LuaRef(lua_State* L);
 	// Lua释放UObject的引用
 	extern int Global_LuaUnRef(lua_State* L);
 
