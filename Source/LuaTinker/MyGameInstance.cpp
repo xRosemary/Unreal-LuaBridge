@@ -11,6 +11,7 @@ void UMyGameInstance::Init()
 	{
 		Env.IsActive = true;
 		GUObjectArray.AddUObjectCreateListener(&Env);
+		GUObjectArray.AddUObjectDeleteListener(&Env);
 	}
 }
 
@@ -19,6 +20,7 @@ void UMyGameInstance::Shutdown()
 	if (Env.IsActive)
 	{
 		GUObjectArray.RemoveUObjectCreateListener(&Env);
+		GUObjectArray.RemoveUObjectDeleteListener(&Env);
 		Env.IsActive = false;
 	}
 	Super::Shutdown();

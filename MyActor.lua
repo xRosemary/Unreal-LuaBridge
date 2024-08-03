@@ -9,12 +9,15 @@ function MyActor:TestFunc()
     UE.error(MyClass)
     self.TestLuaObjVal = UE.NewObject(MyClass, self, "TestLuaObj")
     self.TestLuaObjVal:TestFunc()
+    self.TestLuaObjVal = nil
+    self.TestLuaObjVal2 = UE.NewObject(MyClass, self, "TestLuaObjWithRef")
+    collectgarbage("collect")
     UE.error("--------------")
 end
 
 function MyActor:TestFuncWithParam2(Param1, Param2, Param3)
     if Param3 == false then
-        self.TestLuaObjVal:TestFunc()
+        self.TestLuaObjVal2:TestFunc()
         UE.error(Param3)
         return 654
     end

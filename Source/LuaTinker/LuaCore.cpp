@@ -273,19 +273,19 @@ namespace LuaBridge
         lua_pushlightuserdata(L, Object);
         lua_rawget(L, -2);                                          // ObjectMap.ObjectPtr
 
-        if (lua_istable(L, -1))
+        if (!lua_isnil(L, -1))
         {
+            luaL_checktype(L, -1, LUA_TTABLE);
             lua_pushstring(L, "__NativePtr");
             lua_pushnil(L);
             lua_settable(L, -3);                                    // Instance.__NativePtr = nil
+
+            lua_pushlightuserdata(L, Object);
+            lua_pushnil(L);
+            lua_rawset(L, -4);                                      // ObjectMap.ObjectPtr = nil
         }
 
-        lua_pop(L, 1);
-
-        lua_pushlightuserdata(L, Object);
-        lua_pushnil(L);
-        lua_rawset(L, -3);                                          // ObjectMap.ObjectPtr = nil
-        lua_pop(L, 1);
+        lua_pop(L, 2);
 
         int RefKey = LUA_NOREF;
         if(GObjectReferencer.RemoveObjectRef(Object, &RefKey))

@@ -17,7 +17,7 @@ extern "C" {
 
 namespace LuaBridge
 {
-	class LUATINKER_API LuaEnv : public FUObjectArray::FUObjectCreateListener
+	class LUATINKER_API LuaEnv : public FUObjectArray::FUObjectCreateListener, public FUObjectArray::FUObjectDeleteListener
 	{
 	protected:
 		inline static lua_State* L = nullptr;
@@ -32,7 +32,8 @@ namespace LuaBridge
 		bool TryToBind(UObject* Object);
 		bool BindInternal(UObject* Object, UClass* Class, const TCHAR* InModuleName);
 
-		virtual void NotifyUObjectCreated(const class UObjectBase* Object, int32 Index);
+		virtual void NotifyUObjectCreated(const class UObjectBase* ObjectBase, int32 Index) override;
+		virtual void NotifyUObjectDeleted(const class UObjectBase* ObjectBase, int32 Index) override;
 
 		virtual void OnUObjectArrayShutdown() { GUObjectArray.RemoveUObjectCreateListener(this); IsActive = false; };
 

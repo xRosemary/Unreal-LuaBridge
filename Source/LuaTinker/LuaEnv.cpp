@@ -276,6 +276,11 @@ namespace LuaBridge
         TryToBind((UObject*)(ObjectBase));
     }
 
+    void LuaEnv::NotifyUObjectDeleted(const UObjectBase* ObjectBase, int Index)
+    {
+        UnRegisterObjectToLua(L, (UObject*)(ObjectBase));
+    }
+
     bool LuaEnv::LoadTableForObject(UObject* Object, const char* InModuleName)
     {
         GetRegistryTable(L, "__LoadedModule");
