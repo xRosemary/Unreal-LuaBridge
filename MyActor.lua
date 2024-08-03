@@ -3,22 +3,18 @@ local MyActor = {}
 function MyActor:TestFunc()
     UE.error("--------------")
     UE.dump()
-    -- UE.error(self.__ClassDesc)
-    -- UE.error(self.TestVar)
-    -- UE.error(self.GetTestVar)
-    -- UE.error(self.GetTestVar())
-    -- UE.error(self.GetTestVar2())
-    -- UE.error(self:TestFuncWithParam(123123, "abc", true))
-    -- UE.error(self.TestFuncWithParam)
     self.LuaVar = "TestLuaVar"
-    -- self.TestFuncWithParam2(123123, "abc", true)
-    -- UE.error(self:TestFuncWithParam2(123123, "abc", true))
-    -- UE.error(MyActor.TestFuncWithParam2)
+
+    local MyClass = UE.LoadClass("/Game/BP_TestOBJ.BP_TestOBJ_C")
+    UE.error(MyClass)
+    self.TestLuaObjVal = UE.NewObject(MyClass, self, "TestLuaObj")
+    self.TestLuaObjVal:TestFunc()
     UE.error("--------------")
 end
 
 function MyActor:TestFuncWithParam2(Param1, Param2, Param3)
     if Param3 == false then
+        self.TestLuaObjVal:TestFunc()
         UE.error(Param3)
         return 654
     end

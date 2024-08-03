@@ -196,10 +196,16 @@ namespace LuaBridge
         lua_setmetatable(L, -2);
     }
 
-    // 创建UObject对应的lua实例，Lua栈元素+1
-    static void PushObjectInstance(lua_State* L, UObject* Object)
+    void PushObjectInstance(lua_State* L, UObject* Object)
     {
         check(Object);
+
+        int* TableRef = GObjectReferencer.FindObjectRef(Object);
+        if (TableRef)
+        {
+            lua_rawgeti(L, LUA_REGISTRYINDEX, *TableRef);               // Lua Instance
+            return;
+        }
 
         lua_newtable(L);                                                // 创建实例 Instance
 
@@ -229,15 +235,7 @@ namespace LuaBridge
 
     void PushInstanceProxy(lua_State* L, UObject* Object)
     {
-        int* TableRef = GObjectReferencer.FindObjectRef(Object);
-        if (TableRef)
-        {
-            lua_rawgeti(L, LUA_REGISTRYINDEX, *TableRef);               // Lua Instance
-        }
-        else
-        {
-            PushObjectInstance(L, Object);
-        }
+        PushObjectInstance(L, Object);
 
         lua_newtable(L);                                                // Instance 的代理对象
         lua_newtable(L);                                                // 代理对象的 Metatable
@@ -289,11 +287,10 @@ namespace LuaBridge
         lua_rawset(L, -3);                                          // ObjectMap.ObjectPtr = nil
         lua_pop(L, 1);
 
-        int* RefKey = NULL;
-        GObjectReferencer.RemoveObjectRef(Object, RefKey);
-        if (RefKey)
+        int RefKey = LUA_NOREF;
+        if(GObjectReferencer.RemoveObjectRef(Object, &RefKey))
         {
-            luaL_unref(L, LUA_REGISTRYINDEX, *RefKey);
+            luaL_unref(L, LUA_REGISTRYINDEX, RefKey);
         }
     }
 
@@ -403,92 +400,76 @@ namespace LuaBridge
     }
 
 #pragma region lua_load
-    // /**
-    //  * Global glue function to load a UClass
-    //  */
-    // int Global_LoadClass(lua_State *L)
-    // {
-    //     int NumParams = lua_gettop(L);
-    //     if (NumParams != 1)
-    //     {
-    //         UE_LOG(LogUnLua, Log, TEXT("%s: Invalid parameters!"), ANSI_TO_TCHAR(__FUNCTION__));
-    //         return 0;
-    //     }
+     /**
+      * Global glue function to load a UClass
+      */
+     int Global_LoadClass(lua_State *L)
+     {
+         int NumParams = lua_gettop(L);
+         if (NumParams != 1)
+         {
+             UE_LOG(LogTemp, Warning, TEXT("%s: Invalid parameters!"), ANSI_TO_TCHAR(__FUNCTION__));
+             return 0;
+         }
 
-    //     const char *ClassName = lua_tostring(L, 1);
-    //     if (!ClassName)
-    //     {
-    //         UE_LOG(LogUnLua, Log, TEXT("%s: Invalid class name!"), ANSI_TO_TCHAR(__FUNCTION__));
-    //         return 0;
-    //     }
+         const char *ClassName = lua_tostring(L, 1);
+         if (!ClassName)
+         {
+             UE_LOG(LogTemp, Warning, TEXT("%s: Invalid class name!"), ANSI_TO_TCHAR(__FUNCTION__));
+             return 0;
+         }
 
-    //     FString ClassPath(ClassName);
-    //     // @todo 加载UClass的实现
-    //     UClass* ClassPtr = NULL;
-    //     if (ClassPtr)
-    //     {
-    //         LuaBridge::PushUObject(L, ClassPtr);
-    //     }
-    //     else
-    //     {
-    //         lua_pushnil(L);
-    //     }
+         FString ClassPath(ClassName);
+         UClass* ClassPtr = LoadObject<UClass>(nullptr, *ClassPath);
+         if (!ClassPtr)
+         {
+             return 0;
+         }
 
-    //     return 1;
-    // }
+         PushUObject(L, ClassPtr);
+         return 1;
+     }
 
-    // /**
-    //  * Global glue function to create a UObject
-    //  */
-    // int Global_NewObject(lua_State *L)
-    // {
-    //     int NumParams = lua_gettop(L);
-    //     if (NumParams < 1)
-    //     {
-    //         UE_LOG(LogTemp, Log, TEXT("%s: Invalid parameters!"), ANSI_TO_TCHAR(__FUNCTION__));
-    //         return 0;
-    //     }
+     int Global_NewObject(lua_State* L)
+     {
+         int NumParams = lua_gettop(L);
+         if (NumParams < 1)
+         {
+             UE_LOG(LogTemp, Warning, TEXT("%s: Invalid parameters!"), ANSI_TO_TCHAR(__FUNCTION__));
+             return 0;
+         }
 
-    //     UClass *Class = Cast<UClass>(LuaBridge::GetUObject(L, 1));
-    //     if (!Class)
-    //     {
-    //         UE_LOG(LogTemp, Log, TEXT("%s: Invalid class!"), ANSI_TO_TCHAR(__FUNCTION__));
-    //         return 0;
-    //     }
+         UClass* Class = Cast<UClass>(GetUObjectFromLuaProxy(L, 1));
+         if (!Class)
+         {
+             UE_LOG(LogTemp, Warning, TEXT("%s: Invalid class!"), ANSI_TO_TCHAR(__FUNCTION__));
+             return 0;
+         }
 
-    //     UObject *Outer = NumParams > 1 ? LuaBridge::GetUObject(L, 2) : (UObject*)GetTransientPackage();
-    //     if (!Outer)
-    //     {
-    //         UE_LOG(LogTemp, Log, TEXT("%s: Invalid outer!"), ANSI_TO_TCHAR(__FUNCTION__));
-    //         return 0;
-    //     }
+         UObject* Outer = GetUObjectFromLuaProxy(L, 2);
+         if (!Outer)
+             Outer = GetTransientPackage();
 
-    //     FName Name = NumParams > 2 ? FName(lua_tostring(L, 3)) : NAME_None;
-    //     //EObjectFlags Flags = NumParams > 3 ? EObjectFlags(lua_tointeger(L, 4)) : RF_NoFlags;
+         FName Name = NumParams > 2 ? FName(lua_tostring(L, 3)) : NAME_None;
+         {
+             FStaticConstructObjectParameters ObjParams(Class);
+             ObjParams.Outer = Outer;
+             ObjParams.Name  = Name;
+             UObject* Object = StaticConstructObject_Internal(ObjParams);
 
-    //     {
-    //         const char *ModuleName = NumParams > 3 ? lua_tostring(L, 4) : NULL;
-    //         int TableRef = INDEX_NONE;
-    //         if (NumParams > 4 && lua_type(L, 5) == LUA_TTABLE)
-    //         {
-    //             lua_pushvalue(L, 5);
-    //             TableRef = luaL_ref(L, LUA_REGISTRYINDEX);
-    //         }
-    //         FScopedLuaDynamicBinding Binding(L, Class, ANSI_TO_TCHAR(ModuleName), TableRef);
-    //         UObject *Object = StaticConstructObject_Internal(Class, Outer, Name);
-    //         if (Object)
-    //         {
-    //             LuaBridge::PushUObject(L, Object);
-    //         }
-    //         else
-    //         {
-    //             UE_LOG(LogTemp, Log, TEXT("%s: Failed to new object for class %s!"), ANSI_TO_TCHAR(__FUNCTION__), *Class->GetName());
-    //             return 0;
-    //         }
-    //     }
+             if (Object)
+             {
+                 PushUObject(L, Object);
+             }
+             else
+             {
+                 UE_LOG(LogTemp, Warning, TEXT("%s: Failed to new object for class %s!"), ANSI_TO_TCHAR(__FUNCTION__), *Class->GetName());
+                 return 0;
+             }
+         }
 
-    //     return 1;
-    // }
+         return 1;
+     }
 #pragma endregion
 
     int Global_LuaUnRef(lua_State* L)

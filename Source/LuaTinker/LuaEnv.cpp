@@ -99,9 +99,11 @@ namespace LuaBridge
     }
 
     static const struct luaL_Reg UE_Base_Lib[] = {
-      {"log", LogInfo},
-      {"error", ErrorInfo},
-      {"dump", print_lua_stack},
+      {"log",           LogInfo},
+      {"error",         ErrorInfo},
+      {"dump",          print_lua_stack},
+      {"LoadClass",     Global_LoadClass},
+      {"NewObject",     Global_NewObject},
       {NULL, NULL}  /* sentinel */
     };
 
@@ -187,7 +189,7 @@ namespace LuaBridge
             return false;
         }
 
-        PushUObject(L, Object);             // 此时-1位置为Object的lua实例，-2位置为Module表
+        PushObjectInstance(L, Object);             // 此时-1位置为Object的lua实例，-2位置为Module表
 
         // 函数重载
         for (TFieldIterator<UFunction> It(Class, EFieldIteratorFlags::IncludeSuper, EFieldIteratorFlags::ExcludeDeprecated, EFieldIteratorFlags::ExcludeInterfaces); It; ++It)

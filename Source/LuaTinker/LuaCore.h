@@ -25,6 +25,10 @@ namespace LuaBridge
 	// 将栈顶的lua表放到全局表里的UE表中
 	extern void SetTableForClass(lua_State* L, const char* Name);
 
+	// 创建UObject对应的Lua Instance，Lua栈元素+1
+	// 通过Lua Instance可以访问和修改UObject
+	extern void PushObjectInstance(lua_State* L, UObject* Object);
+
 	// 创建UObject对应的Lua Instance的代理表
 	// 代理表触发GC时会删除相应的Lua Instance，以及GObjectReferencer中的强引用
 	// 这样使得两边都能释放干净
@@ -45,8 +49,8 @@ namespace LuaBridge
 	extern void PushObjectModule(lua_State* L, UObject* Object);
 
 	// 注册UClass的原表
-	// extern int Global_LoadClass(lua_State *L);
-	// extern int Global_NewObject(lua_State *L);
+	extern int Global_LoadClass(lua_State *L);
+	extern int Global_NewObject(lua_State *L);
 
 	// Lua释放UObject的引用
 	extern int Global_LuaUnRef(lua_State* L);
