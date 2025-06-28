@@ -1,44 +1,44 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+#ifndef _LUA_ENV_H_
+#define _LUA_ENV_H_
 
-#pragma once
+#include "../Core.h"
+#include "../UnObjBas.h"
 
-#include "CoreMinimal.h"
-#include "LuaCore.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-#include "ThirdParty/lua.h"
-#include "ThirdParty/lualib.h"
-#include "ThirdParty/lauxlib.h"
-#ifdef __cplusplus
-}
-#endif
+// #ifndef CORE_API
+// #define CORE_API DLL_IMPORT
+// #endif
 
 namespace LuaBridge
 {
-	class LUATINKER_API LuaEnv : public FUObjectArray::FUObjectCreateListener, public FUObjectArray::FUObjectDeleteListener
+	class ILuaEnv
 	{
-	protected:
-		inline static lua_State* L = nullptr;
+	public:
+		virtual void DynamicBind(class UObject* ObjectBase, const TCHAR* ModuleName) = 0;
+		virtual void NotifyUObjectCreated(class UObject* ObjectBase) = 0;
+		virtual void NotifyUObjectDeleted(class UObject* ObjectBase) = 0;
+		virtual void ExecCallLua(UObject* Context, UFunction* NativeFunc, FFrame& TheStack, RESULT_DECL) = 0;
+		virtual bool IsBind(UObject* Context) = 0;
+		virtual void DoCleanUp() = 0;
+		virtual void LuaEngineTick(FLOAT DeltaSeconds) = 0;
+		virtual void LuaMain() = 0;
+	};
+
+	class CORE_API LuaEnv : public ILuaEnv
+	{
+	private:
+		ILuaEnv* m_EnvImpl;
 
 	public:
-		bool LoadTableForObject(UObject* Object, const char* InModuleName);
+		static LuaEnv* GetInstance();
+		virtual void DynamicBind(class UObject* ObjectBase, const TCHAR* ModuleName);
+		virtual void NotifyUObjectCreated(class UObject* ObjectBase);
+		virtual void NotifyUObjectDeleted(class UObject* ObjectBase);
+		virtual void ExecCallLua(UObject* Context, UFunction* NativeFunc, FFrame& TheStack, RESULT_DECL);
 
-	public:
-		LuaEnv();
-		~LuaEnv();
-
-		bool TryToBind(UObject* Object);
-		bool BindInternal(UObject* Object, UClass* Class, const TCHAR* InModuleName);
-
-		virtual void NotifyUObjectCreated(const class UObjectBase* ObjectBase, int32 Index) override;
-		virtual void NotifyUObjectDeleted(const class UObjectBase* ObjectBase, int32 Index) override;
-
-		virtual void OnUObjectArrayShutdown() { GUObjectArray.RemoveUObjectCreateListener(this); IsActive = false; };
-
-		bool IsActive = false;
-
-		DECLARE_FUNCTION(execCallLua);
+		virtual bool IsBind(UObject* Context);
+		virtual void DoCleanUp();
+		virtual void LuaEngineTick(FLOAT DeltaSeconds);
+		virtual void LuaMain();
 	};
 }
+#endif

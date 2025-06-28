@@ -1,69 +1,89 @@
-#ifndef FObjectReferencer_H
-#define FObjectReferencer_H
+#ifndef UObjectReferencer_H
+#define UObjectReferencer_H
 
-#include "Containers/Map.h"
-#include "UObject/GCObject.h"
+#include "../Core.h"
+#include "../UnClass.h"
 
 /**
-* 持有 UObject 的引用，避免其被GC
-**/
-class FObjectReferencer : public FGCObject
+ * 持有 UObject 的引用，避免其被GC
+ **/
+class CORE_API UObjectReferencer : public UObject
 {
 public:
+    DECLARE_CLASS(UObjectReferencer, UObject, CLASS_Transient, Core)
+
     void AddObjectRef(UObject *Object, int RefKey)
     {
-        if(Object == NULL)
+        if (Object == NULL)
         {
             return;
         }
 
-        ReferencedObjects.Add(Object, RefKey);
+        ReferencedObjects.Set(Object, RefKey);
     }
 
-    int* FindObjectRef(UObject *Object)
+    int *FindObjectRef(UObject *Object)
     {
         return ReferencedObjects.Find(Object);
     }
 
-    bool RemoveObjectRef(UObject *Object, int* RefKey)
+    bool RemoveObjectRef(UObject *Object, int *RefKey)
     {
+        guard(UObjectReferencer::RemoveObjectRef, 891HU0wTDoKqlhHUoU1OSuyt6hrrkPmi);
         if (Object == NULL)
         {
             return false;
         }
+        
+        int *TempRefKey = ReferencedObjects.Find(Object);
+        if (TempRefKey != NULL)
+        {
+            *RefKey = *TempRefKey;
+            ReferencedObjects.Remove(Object);
+            return true;
+        }
 
-        return ReferencedObjects.RemoveAndCopyValue(Object, *RefKey);
+        return false;
+        unguard;
     }
 
     void Cleanup()
     {
-        return ReferencedObjects.Empty();
+        ReferencedObjects.Empty();
     }
 
-    virtual void AddReferencedObjects(FReferenceCollector& Collector) override
+    virtual void Serialize(FArchive &Ar)
     {
-        Collector.AddReferencedObjects(ReferencedObjects);
+        guard(UObjectReferencer::Serialize, CPpKnh0T1fo6vjH4GKIjyzTwcyOAu90X);
+        Super::Serialize(Ar);
+        Ar << ReferencedObjects;
+        unguard;
     }
 
-    virtual FString GetReferencerName() const override
+    static UObjectReferencer *Instance()
     {
-        return FString(TEXT("LuaObjectReferencer"));
-    }
-
-    static FObjectReferencer& Instance()
-    {
-        static FObjectReferencer Referencer;
+        guard(UObjectReferencer::Instance, J4Fp3H746SEHmaZsrUQb3HDAQl2UFf5S);
+        static UObjectReferencer *Referencer = NULL;
+        if (Referencer == NULL)
+        {
+            Referencer = ConstructObject<UObjectReferencer>(UObjectReferencer::StaticClass());
+            Referencer->AddToRoot();
+        }
         return Referencer;
+        unguard;
+    }
+
+    static void ReleaseEnv()
+    {
+        Instance()->RemoveFromRoot();
     }
 
 private:
-    FObjectReferencer() {}
-
-    TMap<UObject*, int> ReferencedObjects;
+    TMap<UObject *, int> ReferencedObjects;
 };
 
 #ifndef GObjectReferencer
-#define GObjectReferencer FObjectReferencer::Instance()
+#define GObjectReferencer UObjectReferencer::Instance()
 #endif
 
 #endif
